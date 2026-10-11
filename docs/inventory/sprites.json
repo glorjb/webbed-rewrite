@@ -1,0 +1,4825 @@
+[
+{
+"name": "sGround",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sRoundGround",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSkateCollider",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sGround_slope1_1",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sGround_slope1_2",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sGround_slope2_1",
+"w": 16,
+"h": 32,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sPadded_slope_16",
+"w": 18,
+"h": 18,
+"ox": 1,
+"oy": 1
+},
+{
+"name": "sLogoFR",
+"w": 400,
+"h": 300,
+"ox": 198,
+"oy": 284
+},
+{
+"name": "sPadded_slope_32",
+"w": 34,
+"h": 34,
+"ox": 1,
+"oy": 1
+},
+{
+"name": "sPadded_slope_48",
+"w": 50,
+"h": 50,
+"ox": 1,
+"oy": 1
+},
+{
+"name": "sStickerWolfSpider",
+"w": 80,
+"h": 80,
+"ox": 40,
+"oy": 40
+},
+{
+"name": "sPadded_slope_64",
+"w": 66,
+"h": 66,
+"ox": 1,
+"oy": 1
+},
+{
+"name": "sPadded_slope_80",
+"w": 82,
+"h": 82,
+"ox": 1,
+"oy": 1
+},
+{
+"name": "sPadded_slope_96",
+"w": 98,
+"h": 98,
+"ox": 1,
+"oy": 1
+},
+{
+"name": "sPadded_slope_112",
+"w": 114,
+"h": 114,
+"ox": 1,
+"oy": 1
+},
+{
+"name": "sPadded_slope_128",
+"w": 130,
+"h": 130,
+"ox": 1,
+"oy": 1
+},
+{
+"name": "sPadded_slope2_1",
+"w": 18,
+"h": 34,
+"ox": 1,
+"oy": 1
+},
+{
+"name": "sPadded_slope1_2",
+"w": 34,
+"h": 18,
+"ox": 1,
+"oy": 1
+},
+{
+"name": "sPadded_slope1_1",
+"w": 18,
+"h": 18,
+"ox": 1,
+"oy": 1
+},
+{
+"name": "sWood_slope1_1",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sHalfPipe",
+"w": 64,
+"h": 64,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sWood_slope1_2",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sWood_slope2_1",
+"w": 16,
+"h": 32,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sMud",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sMud_slope1_1",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sStickerPoopHat",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sMud_slope_1_2",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sMud_slope_2_1",
+"w": 16,
+"h": 32,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sTreeTrunk",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sMetal",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sGlass",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sLeavesCollider",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sGroundCover",
+"w": 32,
+"h": 16,
+"ox": 16,
+"oy": 15
+},
+{
+"name": "sVine",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sSeaweed",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sFloatingPlant",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 0
+},
+{
+"name": "sGrassBlade",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sStickerNetcaster",
+"w": 80,
+"h": 80,
+"ox": 40,
+"oy": 40
+},
+{
+"name": "sFernLeaf",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sSeaweedLeaf",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sBranch1",
+"w": 32,
+"h": 112,
+"ox": 16,
+"oy": 111
+},
+{
+"name": "sFragileBranch",
+"w": 32,
+"h": 112,
+"ox": 16,
+"oy": 108
+},
+{
+"name": "sAirshipBody",
+"w": 384,
+"h": 192,
+"ox": 192,
+"oy": 96
+},
+{
+"name": "sFragileBranchFragment1",
+"w": 32,
+"h": 112,
+"ox": 16,
+"oy": 108
+},
+{
+"name": "sFragileBranchFragment2",
+"w": 32,
+"h": 112,
+"ox": 16,
+"oy": 108
+},
+{
+"name": "sFragileBranchFragment3",
+"w": 32,
+"h": 112,
+"ox": 16,
+"oy": 108
+},
+{
+"name": "sFragileBranchFragment4",
+"w": 32,
+"h": 112,
+"ox": 16,
+"oy": 108
+},
+{
+"name": "sFragileBranchSplinters",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sWoodSplinters",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBranchLarge",
+"w": 64,
+"h": 224,
+"ox": 32,
+"oy": 223
+},
+{
+"name": "sBranchLong",
+"w": 64,
+"h": 224,
+"ox": 32,
+"oy": 223
+},
+{
+"name": "sDriftWood1",
+"w": 64,
+"h": 32,
+"ox": 32,
+"oy": 16
+},
+{
+"name": "sDriftWood2",
+"w": 50,
+"h": 37,
+"ox": 25,
+"oy": 18
+},
+{
+"name": "sFern1",
+"w": 67,
+"h": 52,
+"ox": 13,
+"oy": 50
+},
+{
+"name": "sFern2",
+"w": 128,
+"h": 128,
+"ox": 48,
+"oy": 87
+},
+{
+"name": "sGrassTuft",
+"w": 129,
+"h": 136,
+"ox": 64,
+"oy": 126
+},
+{
+"name": "sFern",
+"w": 129,
+"h": 136,
+"ox": 64,
+"oy": 126
+},
+{
+"name": "sEggShell1",
+"w": 100,
+"h": 100,
+"ox": 50,
+"oy": 50
+},
+{
+"name": "sLeafBunch",
+"w": 129,
+"h": 136,
+"ox": 67,
+"oy": 63
+},
+{
+"name": "sLeafBunch3",
+"w": 200,
+"h": 136,
+"ox": 21,
+"oy": 70
+},
+{
+"name": "sLeafBunch2",
+"w": 205,
+"h": 193,
+"ox": 32,
+"oy": 97
+},
+{
+"name": "sGumLeaves1",
+"w": 132,
+"h": 213,
+"ox": 67,
+"oy": 30
+},
+{
+"name": "sGumLeaves2",
+"w": 232,
+"h": 224,
+"ox": 187,
+"oy": 29
+},
+{
+"name": "sGumLeaves3",
+"w": 155,
+"h": 212,
+"ox": 66,
+"oy": 36
+},
+{
+"name": "sGumLeaves4",
+"w": 155,
+"h": 212,
+"ox": 72,
+"oy": 70
+},
+{
+"name": "sGumLeaves5",
+"w": 256,
+"h": 256,
+"ox": 122,
+"oy": 81
+},
+{
+"name": "sWattleLeaves1",
+"w": 187,
+"h": 172,
+"ox": 27,
+"oy": 93
+},
+{
+"name": "sWattleLeaves2",
+"w": 159,
+"h": 137,
+"ox": 75,
+"oy": 68
+},
+{
+"name": "sWattleLeaves3",
+"w": 193,
+"h": 155,
+"ox": 39,
+"oy": 60
+},
+{
+"name": "sWattleLeaves4",
+"w": 145,
+"h": 153,
+"ox": 58,
+"oy": 101
+},
+{
+"name": "sSilkyOakLeaves",
+"w": 97,
+"h": 103,
+"ox": 48,
+"oy": 10
+},
+{
+"name": "sSilkyOakLeaves2",
+"w": 125,
+"h": 125,
+"ox": 27,
+"oy": 45
+},
+{
+"name": "sSilkyOakLeaves3",
+"w": 125,
+"h": 125,
+"ox": 40,
+"oy": 53
+},
+{
+"name": "sLeafBunch_large",
+"w": 500,
+"h": 500,
+"ox": 250,
+"oy": 250
+},
+{
+"name": "sLeafBunch_large2",
+"w": 250,
+"h": 250,
+"ox": 125,
+"oy": 125
+},
+{
+"name": "sLeafBunchBackground_large2",
+"w": 250,
+"h": 250,
+"ox": 125,
+"oy": 125
+},
+{
+"name": "sEgg",
+"w": 100,
+"h": 100,
+"ox": 50,
+"oy": 50
+},
+{
+"name": "sLeafBunchBackground_large",
+"w": 500,
+"h": 500,
+"ox": 250,
+"oy": 250
+},
+{
+"name": "sLeafBunchBackground",
+"w": 95,
+"h": 100,
+"ox": 67,
+"oy": 63
+},
+{
+"name": "sOrchid",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 72
+},
+{
+"name": "sOrchidHeart",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 72
+},
+{
+"name": "sOrchidPetal1",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 72
+},
+{
+"name": "sOrchidPetal2",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 72
+},
+{
+"name": "sOrchid_small",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sStalk",
+"w": 32,
+"h": 3,
+"ox": 0,
+"oy": 1
+},
+{
+"name": "sRocks",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sGroundRock1",
+"w": 112,
+"h": 64,
+"ox": 56,
+"oy": 32
+},
+{
+"name": "sSpider_blob_eat_6",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 19
+},
+{
+"name": "sGroundRock2",
+"w": 128,
+"h": 64,
+"ox": 64,
+"oy": 32
+},
+{
+"name": "sGroundRock3",
+"w": 64,
+"h": 80,
+"ox": 32,
+"oy": 40
+},
+{
+"name": "sGroundRock4",
+"w": 64,
+"h": 48,
+"ox": 32,
+"oy": 24
+},
+{
+"name": "sGroundRock5",
+"w": 64,
+"h": 48,
+"ox": 32,
+"oy": 24
+},
+{
+"name": "sRock1",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sRock2",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sFragileWall",
+"w": 32,
+"h": 96,
+"ox": 16,
+"oy": 48
+},
+{
+"name": "sGameMakerSplash",
+"w": 1920,
+"h": 1080,
+"ox": 960,
+"oy": 540
+},
+{
+"name": "sSmallRock1",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sSmallRock2",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sLogoIT",
+"w": 400,
+"h": 300,
+"ox": 198,
+"oy": 284
+},
+{
+"name": "sGroundRock6",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sGroundRock10",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sGroundRock7",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sGroundRock8",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sGroundRock9",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sBranchTexture",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 63
+},
+{
+"name": "sTrunkTexture",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sMossTexture",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sMetalTexture",
+"w": 96,
+"h": 96,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sGrating",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sTrunkBackground",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 63
+},
+{
+"name": "sThorns",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpikes",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sGroundTexture",
+"w": 96,
+"h": 96,
+"ox": 48,
+"oy": 48
+},
+{
+"name": "sMudTexture",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sIceTexture",
+"w": 96,
+"h": 96,
+"ox": 48,
+"oy": 48
+},
+{
+"name": "sAmberTexture",
+"w": 96,
+"h": 96,
+"ox": 48,
+"oy": 48
+},
+{
+"name": "sGroundBackground",
+"w": 96,
+"h": 96,
+"ox": 48,
+"oy": 48
+},
+{
+"name": "sSpike",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sWhiteSquare",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sTwig",
+"w": 32,
+"h": 3,
+"ox": 0,
+"oy": 1
+},
+{
+"name": "sTwigAnchored",
+"w": 32,
+"h": 8,
+"ox": 0,
+"oy": 4
+},
+{
+"name": "sVineArc",
+"w": 32,
+"h": 16,
+"ox": 16,
+"oy": 0
+},
+{
+"name": "sWind",
+"w": 128,
+"h": 64,
+"ox": 64,
+"oy": 32
+},
+{
+"name": "sWind_clouds",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sGumTreeTexture",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sMushroom",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 31
+},
+{
+"name": "sPlatform",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sLake",
+"w": 64,
+"h": 300,
+"ox": 32,
+"oy": 0
+},
+{
+"name": "sLooseGround1",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sReleaseDateslash",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sLooseGround2",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sLooseGround3",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sTwigBunch",
+"w": 160,
+"h": 64,
+"ox": 80,
+"oy": 32
+},
+{
+"name": "sTwigDoor",
+"w": 32,
+"h": 128,
+"ox": 16,
+"oy": 0
+},
+{
+"name": "sTwigBunch2",
+"w": 96,
+"h": 128,
+"ox": 80,
+"oy": 112
+},
+{
+"name": "sTwigBunch3",
+"w": 144,
+"h": 96,
+"ox": 72,
+"oy": 80
+},
+{
+"name": "sTwigTexture",
+"w": 32,
+"h": 4,
+"ox": 16,
+"oy": 2
+},
+{
+"name": "sSmallDriftwood",
+"w": 64,
+"h": 32,
+"ox": 32,
+"oy": 16
+},
+{
+"name": "sDoubleCrate",
+"w": 64,
+"h": 32,
+"ox": 32,
+"oy": 16
+},
+{
+"name": "sAcorn",
+"w": 32,
+"h": 38,
+"ox": 17,
+"oy": 0
+},
+{
+"name": "sMacadamia",
+"w": 32,
+"h": 38,
+"ox": 17,
+"oy": 0
+},
+{
+"name": "sLeaf",
+"w": 40,
+"h": 38,
+"ox": 21,
+"oy": 0
+},
+{
+"name": "sButton",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 25
+},
+{
+"name": "sSign_water_pump",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sButton_nonstick",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 25
+},
+{
+"name": "sFlyMeter",
+"w": 12,
+"h": 27,
+"ox": 6,
+"oy": 27
+},
+{
+"name": "sLifeBuoy",
+"w": 96,
+"h": 64,
+"ox": 48,
+"oy": 32
+},
+{
+"name": "sPlaceableWeb",
+"w": 32,
+"h": 32,
+"ox": 0,
+"oy": 16
+},
+{
+"name": "sWoodenBlock_square1",
+"w": 7,
+"h": 7,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sWoodenBlock_square2",
+"w": 7,
+"h": 7,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sWoodenBlock_square3",
+"w": 7,
+"h": 7,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sWoodenBlock_rectangle1",
+"w": 14,
+"h": 5,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sWoodenBlock_rectangle2",
+"w": 14,
+"h": 5,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sWoodenBlock_rectangle3",
+"w": 14,
+"h": 5,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sWoodenBlock_triangle1",
+"w": 12,
+"h": 7,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sWoodenBlock_triangle2",
+"w": 7,
+"h": 7,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sWoodenBlock_arch",
+"w": 14,
+"h": 7,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sCrayonDrawings",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBranch2",
+"w": 16,
+"h": 112,
+"ox": 8,
+"oy": 111
+},
+{
+"name": "sBackground",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSky",
+"w": 1920,
+"h": 540,
+"ox": 960,
+"oy": 539
+},
+{
+"name": "sSky2",
+"w": 1920,
+"h": 540,
+"ox": 960,
+"oy": 539
+},
+{
+"name": "sMountains",
+"w": 1920,
+"h": 540,
+"ox": 960,
+"oy": 539
+},
+{
+"name": "sLightning",
+"w": 512,
+"h": 768,
+"ox": 256,
+"oy": 640
+},
+{
+"name": "sLightningCloudFlash",
+"w": 512,
+"h": 512,
+"ox": 250,
+"oy": 174
+},
+{
+"name": "sFlySign",
+"w": 64,
+"h": 128,
+"ox": 32,
+"oy": 127
+},
+{
+"name": "sSign",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sSign_pipes",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sSign_Housing",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sSign_Warning",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sSign_Landslide",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sSign_forge",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sSign_engineering",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sCheckpointSign",
+"w": 64,
+"h": 128,
+"ox": 32,
+"oy": 127
+},
+{
+"name": "sObstacleCourseSign",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 127
+},
+{
+"name": "sBeeSign_right",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sBeeSign_up",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sBeeSign_up_right",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sCavernSky",
+"w": 960,
+"h": 540,
+"ox": 480,
+"oy": 539
+},
+{
+"name": "sCavernWall1",
+"w": 400,
+"h": 500,
+"ox": 248,
+"oy": 247
+},
+{
+"name": "sCavernWall2",
+"w": 600,
+"h": 750,
+"ox": 337,
+"oy": 366
+},
+{
+"name": "sCavernWall3",
+"w": 600,
+"h": 750,
+"ox": 312,
+"oy": 348
+},
+{
+"name": "sCavernWall4",
+"w": 700,
+"h": 875,
+"ox": 347,
+"oy": 464
+},
+{
+"name": "sCavernFloor1",
+"w": 640,
+"h": 362,
+"ox": 306,
+"oy": 98
+},
+{
+"name": "sCavernFloor2",
+"w": 640,
+"h": 361,
+"ox": 321,
+"oy": 129
+},
+{
+"name": "sSkateLettersCollected",
+"w": 34,
+"h": 34,
+"ox": 17,
+"oy": 17
+},
+{
+"name": "sCavernFloor3",
+"w": 640,
+"h": 383,
+"ox": 336,
+"oy": 234
+},
+{
+"name": "sCavernFloor4",
+"w": 640,
+"h": 700,
+"ox": 324,
+"oy": 196
+},
+{
+"name": "sCaveFloor1",
+"w": 640,
+"h": 362,
+"ox": 306,
+"oy": 98
+},
+{
+"name": "sCaveFloor2",
+"w": 640,
+"h": 361,
+"ox": 321,
+"oy": 129
+},
+{
+"name": "sCaveFloor3",
+"w": 640,
+"h": 383,
+"ox": 336,
+"oy": 234
+},
+{
+"name": "sCaveFloor4",
+"w": 640,
+"h": 700,
+"ox": 324,
+"oy": 196
+},
+{
+"name": "sCaveCeiling1",
+"w": 640,
+"h": 362,
+"ox": 317,
+"oy": 268
+},
+{
+"name": "sCaveCeiling2",
+"w": 640,
+"h": 361,
+"ox": 321,
+"oy": 233
+},
+{
+"name": "sCaveCeiling3",
+"w": 640,
+"h": 383,
+"ox": 332,
+"oy": 149
+},
+{
+"name": "sCaveCeiling4",
+"w": 640,
+"h": 700,
+"ox": 316,
+"oy": 501
+},
+{
+"name": "sCavernCeiling1",
+"w": 640,
+"h": 367,
+"ox": 307,
+"oy": 264
+},
+{
+"name": "sCavernCeiling2",
+"w": 640,
+"h": 354,
+"ox": 318,
+"oy": 228
+},
+{
+"name": "sCavernCeiling3",
+"w": 640,
+"h": 335,
+"ox": 340,
+"oy": 147
+},
+{
+"name": "sCavernCeiling4",
+"w": 640,
+"h": 700,
+"ox": 323,
+"oy": 510
+},
+{
+"name": "sCaveBGProps",
+"w": 200,
+"h": 500,
+"ox": 100,
+"oy": 250
+},
+{
+"name": "sCaveRock1",
+"w": 156,
+"h": 108,
+"ox": 78,
+"oy": 54
+},
+{
+"name": "sCaveRock2",
+"w": 156,
+"h": 108,
+"ox": 78,
+"oy": 54
+},
+{
+"name": "sCaveScaffold3",
+"w": 39,
+"h": 400,
+"ox": 19,
+"oy": 200
+},
+{
+"name": "sCaveScaffold2",
+"w": 48,
+"h": 500,
+"ox": 24,
+"oy": 250
+},
+{
+"name": "sSpider_head_shoot6",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sCaveScaffold1",
+"w": 70,
+"h": 800,
+"ox": 35,
+"oy": 400
+},
+{
+"name": "sCavePillar4",
+"w": 200,
+"h": 500,
+"ox": 100,
+"oy": 250
+},
+{
+"name": "sCavePillar3",
+"w": 200,
+"h": 500,
+"ox": 100,
+"oy": 250
+},
+{
+"name": "sCavePillar2",
+"w": 200,
+"h": 500,
+"ox": 100,
+"oy": 250
+},
+{
+"name": "sCavePillar1",
+"w": 320,
+"h": 800,
+"ox": 160,
+"oy": 400
+},
+{
+"name": "sTreeBackground1",
+"w": 1054,
+"h": 2048,
+"ox": 522,
+"oy": 1906
+},
+{
+"name": "sTreeBackground2",
+"w": 1216,
+"h": 2048,
+"ox": 637,
+"oy": 1791
+},
+{
+"name": "sTreeBackground3",
+"w": 616,
+"h": 772,
+"ox": 318,
+"oy": 744
+},
+{
+"name": "sTreeBackground4",
+"w": 616,
+"h": 772,
+"ox": 309,
+"oy": 742
+},
+{
+"name": "sHive",
+"w": 600,
+"h": 600,
+"ox": 302,
+"oy": 492
+},
+{
+"name": "sHiveInterior",
+"w": 945,
+"h": 512,
+"ox": 472,
+"oy": 511
+},
+{
+"name": "sHiveInteriorSky",
+"w": 800,
+"h": 600,
+"ox": 400,
+"oy": 599
+},
+{
+"name": "sHiveInteriorPillars",
+"w": 1000,
+"h": 600,
+"ox": 312,
+"oy": 479
+},
+{
+"name": "sHiveInteriorBees",
+"w": 537,
+"h": 600,
+"ox": 312,
+"oy": 479
+},
+{
+"name": "sHiveInteriorBees2",
+"w": 491,
+"h": 600,
+"ox": 312,
+"oy": 479
+},
+{
+"name": "sHiveInteriorDoor",
+"w": 80,
+"h": 96,
+"ox": 40,
+"oy": 95
+},
+{
+"name": "sHiveInteriorForeground",
+"w": 1000,
+"h": 600,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sBeetlesBackground1",
+"w": 2000,
+"h": 720,
+"ox": 1000,
+"oy": 424
+},
+{
+"name": "sBeetlesBackground2",
+"w": 2000,
+"h": 720,
+"ox": 1000,
+"oy": 348
+},
+{
+"name": "sBeetlesBackground3",
+"w": 2000,
+"h": 720,
+"ox": 1000,
+"oy": 288
+},
+{
+"name": "sBeetleHouse1",
+"w": 300,
+"h": 256,
+"ox": 150,
+"oy": 128
+},
+{
+"name": "sBeetleHouse2",
+"w": 300,
+"h": 256,
+"ox": 150,
+"oy": 128
+},
+{
+"name": "sBeetleHouse3",
+"w": 300,
+"h": 256,
+"ox": 150,
+"oy": 128
+},
+{
+"name": "sCloud1",
+"w": 800,
+"h": 312,
+"ox": 403,
+"oy": 202
+},
+{
+"name": "sCloud2",
+"w": 2000,
+"h": 312,
+"ox": 1027,
+"oy": 207
+},
+{
+"name": "sSoftCloud",
+"w": 700,
+"h": 500,
+"ox": 350,
+"oy": 250
+},
+{
+"name": "sClouds_back",
+"w": 607,
+"h": 1600,
+"ox": 298,
+"oy": 974
+},
+{
+"name": "sClouds_back1",
+"w": 600,
+"h": 800,
+"ox": 297,
+"oy": 753
+},
+{
+"name": "sClouds_back2",
+"w": 607,
+"h": 800,
+"ox": 298,
+"oy": 709
+},
+{
+"name": "sClouds_front2",
+"w": 607,
+"h": 400,
+"ox": 302,
+"oy": 308
+},
+{
+"name": "sPartClouds",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sBackgroundRain",
+"w": 500,
+"h": 500,
+"ox": 250,
+"oy": 250
+},
+{
+"name": "sRain_group",
+"w": 64,
+"h": 128,
+"ox": 32,
+"oy": 0
+},
+{
+"name": "sWoodenCurve128",
+"w": 144,
+"h": 144,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sForegroundRain",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sRainDrop",
+"w": 8,
+"h": 8,
+"ox": 4,
+"oy": 4
+},
+{
+"name": "sSlider",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sToggle",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sUIArrow",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sLogoRU",
+"w": 327,
+"h": 300,
+"ox": 162,
+"oy": 284
+},
+{
+"name": "sTinyScrollFrame",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sSmallScrollFrame",
+"w": 64,
+"h": 128,
+"ox": 32,
+"oy": 64
+},
+{
+"name": "sMediumScrollFrame",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sButtonPrompts",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sImportantIcon",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSignPost",
+"w": 31,
+"h": 600,
+"ox": 15,
+"oy": 100
+},
+{
+"name": "sPhotoDust",
+"w": 500,
+"h": 500,
+"ox": 250,
+"oy": 250
+},
+{
+"name": "sCursor",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sCursorLarge",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sSaveIcon",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sGrabIcon",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sRedX",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSavePlaceholder",
+"w": 640,
+"h": 360,
+"ox": 320,
+"oy": 180
+},
+{
+"name": "sDialogueIcon",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sSpider_head_shoot_old",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_pedipalp_old",
+"w": 16,
+"h": 6,
+"ox": 1,
+"oy": 3
+},
+{
+"name": "sSpider_head_eat_old",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBowerBackground2",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sLogoCN",
+"w": 327,
+"h": 300,
+"ox": 162,
+"oy": 284
+},
+{
+"name": "sSpider_abdomen_old",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_leg_old",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_pedipalp",
+"w": 16,
+"h": 6,
+"ox": 1,
+"oy": 3
+},
+{
+"name": "sSpider_head_eat",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBowerBackground3",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sSpider_abdomen",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_leg",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBowerBackground10",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sSpider_head_shoot",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_head_top",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_blob",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_blob_eyes",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 19
+},
+{
+"name": "sSpider_blob_eat",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 19
+},
+{
+"name": "sSpider_head_shoot1",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_head_top1",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sGiantSkateboardNose",
+"w": 128,
+"h": 32,
+"ox": 64,
+"oy": 16
+},
+{
+"name": "sSpider_pedipalp1",
+"w": 16,
+"h": 6,
+"ox": 1,
+"oy": 3
+},
+{
+"name": "sSpider_head_eat1",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_abdomen1",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_leg1",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_blob_1",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_blob_eyes_1",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 19
+},
+{
+"name": "sSpider_blob_eat_1",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 19
+},
+{
+"name": "sSpider_head_shoot2",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_pedipalp2",
+"w": 16,
+"h": 6,
+"ox": 1,
+"oy": 3
+},
+{
+"name": "sSpider_head_eat2",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_abdomen2",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_blob_2",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_leg2",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_head_shoot3",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_head_top3",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_pedipalp3",
+"w": 16,
+"h": 6,
+"ox": 1,
+"oy": 3
+},
+{
+"name": "sSpider_head_eat3",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_abdomen3",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_blob_3",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_leg3",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_head_eat4",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_head_shoot4",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_head_top4",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_abdomen4",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_blob_4",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_pedipalp4",
+"w": 16,
+"h": 6,
+"ox": 1,
+"oy": 3
+},
+{
+"name": "sSpider_leg4",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_head_shoot5",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBlob_eyes_5",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 21
+},
+{
+"name": "sSpider_pedipalp5",
+"w": 16,
+"h": 6,
+"ox": 1,
+"oy": 3
+},
+{
+"name": "sSpider_head_eat5",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBlob_eat_5",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_abdomen5",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSwitchScreen",
+"w": 200,
+"h": 86,
+"ox": 167,
+"oy": 43
+},
+{
+"name": "sSpider_blob_5",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_leg5",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sFlameParticle",
+"w": 48,
+"h": 48,
+"ox": 21,
+"oy": 24
+},
+{
+"name": "sFlameParticle1",
+"w": 48,
+"h": 48,
+"ox": 24,
+"oy": 24
+},
+{
+"name": "sWebParticle",
+"w": 9,
+"h": 2,
+"ox": 4,
+"oy": 1
+},
+{
+"name": "sWindParticle",
+"w": 64,
+"h": 32,
+"ox": 32,
+"oy": 16
+},
+{
+"name": "sWindCloud",
+"w": 192,
+"h": 96,
+"ox": 96,
+"oy": 48
+},
+{
+"name": "sWaterSplash",
+"w": 8,
+"h": 8,
+"ox": 4,
+"oy": 4
+},
+{
+"name": "sDeathParticle",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sMudSplash",
+"w": 8,
+"h": 8,
+"ox": 4,
+"oy": 4
+},
+{
+"name": "sDirt",
+"w": 8,
+"h": 8,
+"ox": 4,
+"oy": 4
+},
+{
+"name": "sForceFieldSparkle",
+"w": 7,
+"h": 7,
+"ox": 3,
+"oy": 3
+},
+{
+"name": "sGemSparkle",
+"w": 13,
+"h": 13,
+"ox": 6,
+"oy": 6
+},
+{
+"name": "sBullet",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBulletImpact",
+"w": 24,
+"h": 24,
+"ox": 12,
+"oy": 12
+},
+{
+"name": "sSpark",
+"w": 5,
+"h": 1,
+"ox": 2,
+"oy": 0
+},
+{
+"name": "sDust",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sFireLight",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sCircle",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sCheckpoint",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sRescueZone",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sWayPoint",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sRoomTransition",
+"w": 64,
+"h": 64,
+"ox": 63,
+"oy": 48
+},
+{
+"name": "sRoomTransition_pretty",
+"w": 128,
+"h": 128,
+"ox": 63,
+"oy": 80
+},
+{
+"name": "sRoomTransition_pretty_soft",
+"w": 128,
+"h": 128,
+"ox": 63,
+"oy": 80
+},
+{
+"name": "sNone",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sWater",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sPoison",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sFire",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sWater2",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sDraft",
+"w": 32,
+"h": 32,
+"ox": 0,
+"oy": 16
+},
+{
+"name": "sWaterSphere",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpiderBubble",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sWebShot",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sDoor",
+"w": 64,
+"h": 80,
+"ox": 32,
+"oy": 63
+},
+{
+"name": "sBeetlesCaveDoor",
+"w": 320,
+"h": 288,
+"ox": 160,
+"oy": 271
+},
+{
+"name": "sGroup",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sAutoDoor",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sTeleporter",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sExitDoor",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sMusicArea",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sTutorial",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sBalloonArea",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sNPCAttractor",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sNPCAttractor2",
+"w": 64,
+"h": 64,
+"ox": 63,
+"oy": 32
+},
+{
+"name": "sMudDrips",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sHiddenWall",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sDissolve",
+"w": 64,
+"h": 64,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sSkateboard",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSkateboardWheel",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sBirdPeckHazard",
+"w": 180,
+"h": 288,
+"ox": 0,
+"oy": 144
+},
+{
+"name": "sFly",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sFly_whole",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sFly_head",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sFly_head_stunned",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 13
+},
+{
+"name": "sFly_abdomen",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 13
+},
+{
+"name": "sPlaceMarker",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sFly_wing",
+"w": 13,
+"h": 20,
+"ox": 6,
+"oy": 18
+},
+{
+"name": "sFly_webbed",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sFlyLordHead",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 21
+},
+{
+"name": "sReleaseDateComing",
+"w": 256,
+"h": 64,
+"ox": 128,
+"oy": 32
+},
+{
+"name": "sFlyLordThorax",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 21
+},
+{
+"name": "sNurseAntHead",
+"w": 32,
+"h": 32,
+"ox": 8,
+"oy": 25
+},
+{
+"name": "sFlyLordAbdomen",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 35
+},
+{
+"name": "sFlyLordWing",
+"w": 64,
+"h": 64,
+"ox": 36,
+"oy": 22
+},
+{
+"name": "sFlyLordLeg",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sAnt",
+"w": 64,
+"h": 32,
+"ox": 32,
+"oy": 16
+},
+{
+"name": "sPickupSpot",
+"w": 160,
+"h": 112,
+"ox": 80,
+"oy": 32
+},
+{
+"name": "sPickupSpot_Background",
+"w": 160,
+"h": 48,
+"ox": 80,
+"oy": 32
+},
+{
+"name": "sDropoffSpot",
+"w": 160,
+"h": 128,
+"ox": 80,
+"oy": 48
+},
+{
+"name": "sDropoffSpot_Background",
+"w": 160,
+"h": 64,
+"ox": 80,
+"oy": 48
+},
+{
+"name": "sAntAbdomen",
+"w": 16,
+"h": 16,
+"ox": 11,
+"oy": 8
+},
+{
+"name": "sAntThorax",
+"w": 24,
+"h": 16,
+"ox": 4,
+"oy": 8
+},
+{
+"name": "sForemAntThorax",
+"w": 24,
+"h": 16,
+"ox": 4,
+"oy": 8
+},
+{
+"name": "sSoldierAntThorax",
+"w": 24,
+"h": 16,
+"ox": 4,
+"oy": 8
+},
+{
+"name": "sAntHead",
+"w": 32,
+"h": 16,
+"ox": 8,
+"oy": 9
+},
+{
+"name": "sForemAntHead",
+"w": 32,
+"h": 22,
+"ox": 8,
+"oy": 12
+},
+{
+"name": "sSoldierAntHead",
+"w": 32,
+"h": 22,
+"ox": 8,
+"oy": 12
+},
+{
+"name": "sAntAntenna",
+"w": 11,
+"h": 10,
+"ox": 0,
+"oy": 9
+},
+{
+"name": "sBowerBackground19",
+"w": 125,
+"h": 250,
+"ox": 62,
+"oy": 125
+},
+{
+"name": "sAntLeg",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sFireAnt",
+"w": 32,
+"h": 16,
+"ox": 16,
+"oy": 8
+},
+{
+"name": "sAntLarva",
+"w": 32,
+"h": 10,
+"ox": 0,
+"oy": 5
+},
+{
+"name": "sStickerRedback_arachnophobia",
+"w": 100,
+"h": 100,
+"ox": 50,
+"oy": 50
+},
+{
+"name": "sMoth",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 21
+},
+{
+"name": "sMothHead",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 21
+},
+{
+"name": "sMothEyes",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 21
+},
+{
+"name": "sMothAntenna",
+"w": 11,
+"h": 10,
+"ox": 1,
+"oy": 9
+},
+{
+"name": "sMothLeg",
+"w": 16,
+"h": 8,
+"ox": 0,
+"oy": 2
+},
+{
+"name": "sMothAbdomen",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sMothOuterWing",
+"w": 64,
+"h": 64,
+"ox": 37,
+"oy": 19
+},
+{
+"name": "sMothInnerWing",
+"w": 64,
+"h": 64,
+"ox": 38,
+"oy": 21
+},
+{
+"name": "sBird",
+"w": 805,
+"h": 377,
+"ox": 323,
+"oy": 354
+},
+{
+"name": "sReleaseDateSept",
+"w": 100,
+"h": 64,
+"ox": 50,
+"oy": 32
+},
+{
+"name": "sMechant",
+"w": 479,
+"h": 171,
+"ox": 253,
+"oy": 165
+},
+{
+"name": "sMechantThigh",
+"w": 34,
+"h": 70,
+"ox": 17,
+"oy": 46
+},
+{
+"name": "sMechantShin",
+"w": 34,
+"h": 70,
+"ox": 17,
+"oy": 46
+},
+{
+"name": "sMechantLeg",
+"w": 34,
+"h": 70,
+"ox": 17,
+"oy": 46
+},
+{
+"name": "sMechantMandibles",
+"w": 98,
+"h": 50,
+"ox": 8,
+"oy": 25
+},
+{
+"name": "sMechantMandibles_raw",
+"w": 98,
+"h": 50,
+"ox": 8,
+"oy": 25
+},
+{
+"name": "sMechantMandibles_hot",
+"w": 98,
+"h": 50,
+"ox": 8,
+"oy": 25
+},
+{
+"name": "sSkateBird",
+"w": 195,
+"h": 168,
+"ox": 97,
+"oy": 161
+},
+{
+"name": "sPOI1",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sPOI_outer",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sPOI_focus",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sPOI2",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sPOI3",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sPOI_line",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sPOI_line2",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sCameraWall",
+"w": 32,
+"h": 128,
+"ox": 0,
+"oy": 64
+},
+{
+"name": "sCamera",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sZoom",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sCinematicCamera",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sPeckBlocker",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sParachute",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sWebNode",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sCollectableIcon",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sCollectableIcon2",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sCollectable",
+"w": 7,
+"h": 15,
+"ox": 3,
+"oy": 7
+},
+{
+"name": "sCollectable2",
+"w": 7,
+"h": 15,
+"ox": 3,
+"oy": 7
+},
+{
+"name": "sPollen",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sBabySpider2",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 7
+},
+{
+"name": "sBabySpider",
+"w": 8,
+"h": 8,
+"ox": 4,
+"oy": 3
+},
+{
+"name": "sBabyBlob",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 7
+},
+{
+"name": "sFlyIcon",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sAntLarvaeIcon",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 14
+},
+{
+"name": "sStickerHardHat",
+"w": 70,
+"h": 70,
+"ox": 35,
+"oy": 35
+},
+{
+"name": "sPollenIcon",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBabySpiderIcon",
+"w": 24,
+"h": 24,
+"ox": 11,
+"oy": 12
+},
+{
+"name": "sBabyBlobIcon",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sBee",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 21
+},
+{
+"name": "sBeeAntenna",
+"w": 64,
+"h": 64,
+"ox": 34,
+"oy": 17
+},
+{
+"name": "sBeeInnerWing",
+"w": 64,
+"h": 64,
+"ox": 36,
+"oy": 22
+},
+{
+"name": "sBeeOuterWing",
+"w": 64,
+"h": 64,
+"ox": 36,
+"oy": 22
+},
+{
+"name": "sNurseHat",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBeeHead",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 21
+},
+{
+"name": "sBeeHead_Queen",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 21
+},
+{
+"name": "sBeeHead_Princess",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 21
+},
+{
+"name": "sBeeThorax",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 21
+},
+{
+"name": "sBeeAbdomen",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 35
+},
+{
+"name": "sBeeAbdomen_Princess",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 35
+},
+{
+"name": "sBeeAbdomen_Queen",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 40
+},
+{
+"name": "sBeeQueen",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 21
+},
+{
+"name": "sBeeLeg",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sBowerBackground1",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sSwitchJoyCon",
+"w": 33,
+"h": 86,
+"ox": 5,
+"oy": 43
+},
+{
+"name": "sBeeLeg_Queen",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sBeeArm",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sBeeArm_Queen",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sBackgroundBees",
+"w": 512,
+"h": 512,
+"ox": 256,
+"oy": 256
+},
+{
+"name": "sBowerBackground9",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sQueenCell",
+"w": 48,
+"h": 48,
+"ox": 24,
+"oy": 24
+},
+{
+"name": "sBroodCell",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBroodCell_part5",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBroodCell_part4",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBroodCell_part3",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBroodCell_part2",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBroodCell_part1",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sButton_base",
+"w": 64,
+"h": 32,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sLeverBase",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 32
+},
+{
+"name": "sProximitySensor_no",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sProximitySensor_yes",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sLogoPB",
+"w": 400,
+"h": 300,
+"ox": 198,
+"oy": 284
+},
+{
+"name": "sProximitySensor_Aura",
+"w": 60,
+"h": 60,
+"ox": 30,
+"oy": 30
+},
+{
+"name": "sBowerBackground13",
+"w": 188,
+"h": 376,
+"ox": 94,
+"oy": 188
+},
+{
+"name": "sProximitySensor_Aura_Green",
+"w": 66,
+"h": 66,
+"ox": 33,
+"oy": 33
+},
+{
+"name": "sLever",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 57
+},
+{
+"name": "sForceField_generator",
+"w": 64,
+"h": 32,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sMetalPanel_32",
+"w": 32,
+"h": 16,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sMetalPanel_64",
+"w": 64,
+"h": 16,
+"ox": 32,
+"oy": 16
+},
+{
+"name": "sMetalPanel_128",
+"w": 128,
+"h": 16,
+"ox": 64,
+"oy": 16
+},
+{
+"name": "sMetalPanel_128x32",
+"w": 128,
+"h": 32,
+"ox": 64,
+"oy": 16
+},
+{
+"name": "sCraneHead",
+"w": 128,
+"h": 32,
+"ox": 64,
+"oy": 16
+},
+{
+"name": "sElevatorPlatform",
+"w": 192,
+"h": 32,
+"ox": 96,
+"oy": 32
+},
+{
+"name": "sHangingElevator",
+"w": 192,
+"h": 128,
+"ox": 96,
+"oy": 38
+},
+{
+"name": "sGiantSkateboardWheel",
+"w": 12,
+"h": 12,
+"ox": 6,
+"oy": 6
+},
+{
+"name": "sWoodPanel_64",
+"w": 64,
+"h": 18,
+"ox": 32,
+"oy": 17
+},
+{
+"name": "sWoodPanel_128",
+"w": 128,
+"h": 18,
+"ox": 64,
+"oy": 17
+},
+{
+"name": "sDrawBridge",
+"w": 256,
+"h": 64,
+"ox": 15,
+"oy": 32
+},
+{
+"name": "sDrawBridge2",
+"w": 400,
+"h": 64,
+"ox": 15,
+"oy": 32
+},
+{
+"name": "sDrawBridge3",
+"w": 256,
+"h": 64,
+"ox": 15,
+"oy": 32
+},
+{
+"name": "sWoodPanel_32",
+"w": 32,
+"h": 18,
+"ox": 16,
+"oy": 17
+},
+{
+"name": "sPiston_32",
+"w": 128,
+"h": 32,
+"ox": 119,
+"oy": 16
+},
+{
+"name": "sReleaseDate6",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sPiston_64",
+"w": 128,
+"h": 64,
+"ox": 117,
+"oy": 32
+},
+{
+"name": "sPistonArm",
+"w": 256,
+"h": 32,
+"ox": 0,
+"oy": 16
+},
+{
+"name": "sPistonWheel",
+"w": 160,
+"h": 160,
+"ox": 80,
+"oy": 80
+},
+{
+"name": "sRail",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sRailFollower",
+"w": 64,
+"h": 64,
+"ox": 25,
+"oy": 32
+},
+{
+"name": "sCogChain",
+"w": 20,
+"h": 20,
+"ox": 2,
+"oy": 2
+},
+{
+"name": "sChainBelt",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sSmallChain",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sLargeChain",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sChain",
+"w": 32,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sChainPulleyStart",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sChainPulleyEnd",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sCogChainMarker",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sTrigger",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sLogo",
+"w": 327,
+"h": 300,
+"ox": 162,
+"oy": 284
+},
+{
+"name": "sObjectChanger",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sLUT",
+"w": 512,
+"h": 512,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sAnd",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sNand",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sSkateLettersNotCollected",
+"w": 34,
+"h": 34,
+"ox": 17,
+"oy": 17
+},
+{
+"name": "sOr",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sXOr",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sNor",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sTimer",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sDelay",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sProximitySensorPuzzle",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sTank1",
+"w": 128,
+"h": 192,
+"ox": 64,
+"oy": 191
+},
+{
+"name": "sWaterTank",
+"w": 128,
+"h": 192,
+"ox": 64,
+"oy": 191
+},
+{
+"name": "sBackgroundTank",
+"w": 128,
+"h": 192,
+"ox": 64,
+"oy": 191
+},
+{
+"name": "sBackgroundTank_Broken",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 255
+},
+{
+"name": "sBackgroundWaterTank",
+"w": 128,
+"h": 192,
+"ox": 64,
+"oy": 191
+},
+{
+"name": "sPipeWindow",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sWaterPipeWindow",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sElevator",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sTank2",
+"w": 64,
+"h": 96,
+"ox": 32,
+"oy": 95
+},
+{
+"name": "sAirlock",
+"w": 128,
+"h": 192,
+"ox": 64,
+"oy": 96
+},
+{
+"name": "sAnimatedPump",
+"w": 160,
+"h": 128,
+"ox": 80,
+"oy": 64
+},
+{
+"name": "sPivot",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sPumpIcon",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sSave",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sLoad",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sHinge",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sRotor",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 8
+},
+{
+"name": "sBrassCog",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sGiantSkateboardTail",
+"w": 128,
+"h": 32,
+"ox": 64,
+"oy": 16
+},
+{
+"name": "sBowerBackground20",
+"w": 125,
+"h": 250,
+"ox": 62,
+"oy": 125
+},
+{
+"name": "sIronCog",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sLargeCog",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sBowerBackgroundMockup",
+"w": 500,
+"h": 375,
+"ox": 250,
+"oy": 187
+},
+{
+"name": "sLargeCogTooth",
+"w": 32,
+"h": 32,
+"ox": 20,
+"oy": 16
+},
+{
+"name": "sBrassPipe",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 8
+},
+{
+"name": "sPipeSlot",
+"w": 64,
+"h": 32,
+"ox": 32,
+"oy": 8
+},
+{
+"name": "sPathFollower",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sGearBox",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sMachinesPalette",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sBirdFeathers",
+"w": 40,
+"h": 40,
+"ox": 20,
+"oy": 20
+},
+{
+"name": "sBell",
+"w": 32,
+"h": 40,
+"ox": 16,
+"oy": 20
+},
+{
+"name": "sBellDongle",
+"w": 32,
+"h": 40,
+"ox": 16,
+"oy": 20
+},
+{
+"name": "sHose",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sNozzle",
+"w": 16,
+"h": 16,
+"ox": 2,
+"oy": 8
+},
+{
+"name": "sHosePlug",
+"w": 16,
+"h": 16,
+"ox": 8,
+"oy": 15
+},
+{
+"name": "sPulley",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 8
+},
+{
+"name": "sDistanceJoint",
+"w": 64,
+"h": 32,
+"ox": 0,
+"oy": 16
+},
+{
+"name": "sMechant1",
+"w": 512,
+"h": 256,
+"ox": 256,
+"oy": 128
+},
+{
+"name": "sBeetle",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sBeetleLeg1",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sBeetleThorax",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sBeetleHead",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sBeetleHead_horns",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sBeetleAbdomen",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sBeetleAbdomen_BrokenWing",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sBeetleAbdomen_Open",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sBeetleWingCover_2",
+"w": 256,
+"h": 256,
+"ox": 128,
+"oy": 128
+},
+{
+"name": "sBeetleWing",
+"w": 128,
+"h": 128,
+"ox": 90,
+"oy": 69
+},
+{
+"name": "sBeetleWingCover",
+"w": 60,
+"h": 36,
+"ox": 59,
+"oy": 18
+},
+{
+"name": "sSeesaw",
+"w": 704,
+"h": 80,
+"ox": 352,
+"oy": 59
+},
+{
+"name": "sSeesawLong",
+"w": 1136,
+"h": 80,
+"ox": 568,
+"oy": 59
+},
+{
+"name": "sSeesawPivot",
+"w": 128,
+"h": 112,
+"ox": 64,
+"oy": 0
+},
+{
+"name": "sHugeDungBall",
+"w": 192,
+"h": 192,
+"ox": 96,
+"oy": 96
+},
+{
+"name": "sDungBalls",
+"w": 48,
+"h": 48,
+"ox": 24,
+"oy": 24
+},
+{
+"name": "sBalloon",
+"w": 384,
+"h": 384,
+"ox": 192,
+"oy": 192
+},
+{
+"name": "sFullAirship",
+"w": 384,
+"h": 600,
+"ox": 192,
+"oy": 300
+},
+{
+"name": "sSmallAirshipBody",
+"w": 384,
+"h": 192,
+"ox": 192,
+"oy": 96
+},
+{
+"name": "sAirshipEngine",
+"w": 160,
+"h": 96,
+"ox": 80,
+"oy": 24
+},
+{
+"name": "sAirshipEngineLoop",
+"w": 160,
+"h": 128,
+"ox": 80,
+"oy": 56
+},
+{
+"name": "sAirshipRightFairing",
+"w": 160,
+"h": 96,
+"ox": 80,
+"oy": 24
+},
+{
+"name": "sAirshipLeftFairing",
+"w": 160,
+"h": 96,
+"ox": 80,
+"oy": 24
+},
+{
+"name": "sOpal1",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sOpalPattern",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sOpalPattern2",
+"w": 48,
+"h": 48,
+"ox": 24,
+"oy": 24
+},
+{
+"name": "sOpal2",
+"w": 48,
+"h": 48,
+"ox": 24,
+"oy": 24
+},
+{
+"name": "sOpal3",
+"w": 48,
+"h": 48,
+"ox": 24,
+"oy": 24
+},
+{
+"name": "sOpal4",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sOpal_2xinterpolated",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sOpalPlinth",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sOpalPlinth_background",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sMap",
+"w": 448,
+"h": 288,
+"ox": -6,
+"oy": -6
+},
+{
+"name": "sMapMarker",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 21
+},
+{
+"name": "sBalloonBlueprint",
+"w": 448,
+"h": 288,
+"ox": -6,
+"oy": -6
+},
+{
+"name": "sDottedLines",
+"w": 1000,
+"h": 1,
+"ox": 500,
+"oy": 0
+},
+{
+"name": "sPageCrease",
+"w": 320,
+"h": 300,
+"ox": 160,
+"oy": 0
+},
+{
+"name": "sBookmarks",
+"w": 34,
+"h": 34,
+"ox": 17,
+"oy": 17
+},
+{
+"name": "sBookCover",
+"w": 492,
+"h": 316,
+"ox": 246,
+"oy": 8
+},
+{
+"name": "sStickerPlaceholder",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sStickerSkateboard",
+"w": 100,
+"h": 100,
+"ox": 50,
+"oy": 50
+},
+{
+"name": "sConfetti",
+"w": 8,
+"h": 8,
+"ox": 4,
+"oy": 4
+},
+{
+"name": "sBowerBackground23",
+"w": 125,
+"h": 250,
+"ox": 62,
+"oy": 125
+},
+{
+"name": "sStickerWolfSpider_arachnophobia",
+"w": 80,
+"h": 80,
+"ox": 40,
+"oy": 40
+},
+{
+"name": "sPropellerHat",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBowerBackground24",
+"w": 125,
+"h": 250,
+"ox": 62,
+"oy": 125
+},
+{
+"name": "sStickerNurseHat",
+"w": 80,
+"h": 80,
+"ox": 40,
+"oy": 40
+},
+{
+"name": "sStickerFlyCurse",
+"w": 80,
+"h": 80,
+"ox": 40,
+"oy": 40
+},
+{
+"name": "sLogoES",
+"w": 500,
+"h": 300,
+"ox": 246,
+"oy": 284
+},
+{
+"name": "sSpider_head_eat6",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_blob_eyes_6",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 19
+},
+{
+"name": "sBowerBackground17",
+"w": 188,
+"h": 376,
+"ox": 94,
+"oy": 188
+},
+{
+"name": "sSkateLetters",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSignFrame",
+"w": 80,
+"h": 80,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sSbugGamesSplash",
+"w": 1920,
+"h": 1080,
+"ox": 960,
+"oy": 540
+},
+{
+"name": "sStickerOrbWeaver",
+"w": 100,
+"h": 80,
+"ox": 50,
+"oy": 40
+},
+{
+"name": "sPoopHat",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBowerBackground21",
+"w": 125,
+"h": 250,
+"ox": 62,
+"oy": 125
+},
+{
+"name": "sReleaseDate0",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sFlyCurse",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sLogoDE",
+"w": 450,
+"h": 300,
+"ox": 222,
+"oy": 284
+},
+{
+"name": "sBowerBackground15",
+"w": 188,
+"h": 376,
+"ox": 94,
+"oy": 188
+},
+{
+"name": "sWoodenCurve64",
+"w": 80,
+"h": 80,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sBowerBackground12",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sPageLines",
+"w": 460,
+"h": 300,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sBackgroundBeesVertical",
+"w": 512,
+"h": 512,
+"ox": 256,
+"oy": 256
+},
+{
+"name": "sSpider_head_top6",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSpider_abdomen6",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sHardHat",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sDormantRoboSpider",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sPolaroid",
+"w": 162,
+"h": 186,
+"ox": 81,
+"oy": 81
+},
+{
+"name": "sBowerBackground18",
+"w": 188,
+"h": 375,
+"ox": 94,
+"oy": 187
+},
+{
+"name": "sStickerBoyfriend",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sAirMechantPlans",
+"w": 250,
+"h": 150,
+"ox": 125,
+"oy": 75
+},
+{
+"name": "sBowerBackground11",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sBowerBackground6",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sSpider_pedipalp6",
+"w": 16,
+"h": 6,
+"ox": 1,
+"oy": 3
+},
+{
+"name": "sBowerBackgroundWall2",
+"w": 750,
+"h": 500,
+"ox": 143,
+"oy": 262
+},
+{
+"name": "sStickerRobot",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sStickerRedback",
+"w": 100,
+"h": 100,
+"ox": 50,
+"oy": 50
+},
+{
+"name": "sWebNet",
+"w": 600,
+"h": 600,
+"ox": 300,
+"oy": 300
+},
+{
+"name": "sNurseAntHeadOld",
+"w": 32,
+"h": 32,
+"ox": 8,
+"oy": 25
+},
+{
+"name": "sWoodenCurve256",
+"w": 272,
+"h": 272,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sBowerBackground8",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sWhiteSplash",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBoyfriendOffScreen",
+"w": 128,
+"h": 128,
+"ox": 64,
+"oy": 64
+},
+{
+"name": "sHiddenCollectable",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sStickerSkateboard_arachnophobia",
+"w": 100,
+"h": 100,
+"ox": 50,
+"oy": 50
+},
+{
+"name": "sBowerBackgroundWall4",
+"w": 600,
+"h": 250,
+"ox": 79,
+"oy": 127
+},
+{
+"name": "sReleaseDateWishlist",
+"w": 140,
+"h": 62,
+"ox": 70,
+"oy": 31
+},
+{
+"name": "sEggShell3",
+"w": 100,
+"h": 100,
+"ox": 50,
+"oy": 50
+},
+{
+"name": "sSpider_blob_6",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sPostitNote",
+"w": 100,
+"h": 100,
+"ox": 28,
+"oy": 30
+},
+{
+"name": "sBowerBackground4",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sSbugGamesSplashPixel",
+"w": 160,
+"h": 90,
+"ox": 80,
+"oy": 45
+},
+{
+"name": "sBowerBackground16",
+"w": 188,
+"h": 376,
+"ox": 94,
+"oy": 188
+},
+{
+"name": "sHats",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sStickersLabel",
+"w": 90,
+"h": 72,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sSpider_leg6",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSkateAntHead",
+"w": 32,
+"h": 22,
+"ox": 8,
+"oy": 12
+},
+{
+"name": "sBowerBackground7",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sSign_fuel_pump",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sNoWebsArea",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sEggShell2",
+"w": 100,
+"h": 100,
+"ox": 50,
+"oy": 50
+},
+{
+"name": "sDormantRoboBlob",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sBowerBackground22",
+"w": 125,
+"h": 250,
+"ox": 62,
+"oy": 125
+},
+{
+"name": "sBowerBackground5",
+"w": 250,
+"h": 500,
+"ox": 125,
+"oy": 250
+},
+{
+"name": "sPrincessCrown",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sSignHat",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sBulletPoint",
+"w": 16,
+"h": 16,
+"ox": 0,
+"oy": 0
+},
+{
+"name": "sBowerBackground14",
+"w": 188,
+"h": 376,
+"ox": 94,
+"oy": 188
+},
+{
+"name": "sReleaseDate9",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sStickerNetcaster_arachnophobia",
+"w": 80,
+"h": 80,
+"ox": 40,
+"oy": 40
+},
+{
+"name": "sSign_power_station",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sGiantSkateboard",
+"w": 128,
+"h": 32,
+"ox": 64,
+"oy": 16
+},
+{
+"name": "sGlue",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sReleaseDate1",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sStickerPrincessCrown",
+"w": 90,
+"h": 90,
+"ox": 45,
+"oy": 45
+},
+{
+"name": "sFoldedMechant",
+"w": 395,
+"h": 278,
+"ox": 180,
+"oy": 228
+},
+{
+"name": "sGolfBall",
+"w": 32,
+"h": 32,
+"ox": 16,
+"oy": 16
+},
+{
+"name": "sStickerBoyfriend_arachnophobia",
+"w": 64,
+"h": 64,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sControlsLayout",
+"w": 300,
+"h": 150,
+"ox": 150,
+"oy": 116
+},
+{
+"name": "sSign_Exit",
+"w": 64,
+"h": 58,
+"ox": 32,
+"oy": 32
+},
+{
+"name": "sBowerBackgroundWall1",
+"w": 750,
+"h": 500,
+"ox": 148,
+"oy": 268
+},
+{
+"name": "sBowerBackgroundWall3",
+"w": 600,
+"h": 376,
+"ox": 107,
+"oy": 196
+},
+{
+"name": "sBowerSky",
+"w": 960,
+"h": 540,
+"ox": 480,
+"oy": 539
+}
+]

@@ -1,0 +1,12 @@
+# Never commit or distribute original Webbed assets
+extracted/
+*.win
+*.dat
+*.ogg
+*.wav
+*.png
+# Lifted/decompiled original game code stays local
+*.gml
+*.lift
+*.asm
+ghidra_c/

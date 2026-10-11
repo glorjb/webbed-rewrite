@@ -1,0 +1,69 @@
+{
+ "session": "M3_jump_in_place_20261011-024349",
+ "build": "steam-7679547",
+ "sha256": {
+  "segment_01.jsonl": "ed5f79bc40b0b7817103ccd4cae6ddbd27b38a32c2a1a1cb0ab5414236b804a2",
+  "segment_01_webs.jsonl": "7d802cc0e2655ada9e6e65f8bd68218b5d285bad38199a64293b5f3fa656b0f3",
+  "session.json": "5ba24a6803a7a631ffc9a814e3e27af79e9183873b61b6cb127c7862f0fcde99"
+ },
+ "quality": {
+  "duration_s": 36.3,
+  "rows": 2171,
+  "player_rows": 2041,
+  "coverage": 1.0,
+  "skipped": 0,
+  "torn": 13
+ },
+ "validated": {
+  "free_flight": {
+   "pairs": 367,
+   "model": "gravity (0,10) m/s^2 + scripted quadratic drag 0.005 N*(px/step)^2, damping 0",
+   "rms_residual_pxps": 5e-06,
+   "blind_fit_k_per_px": 0.00027064
+  },
+  "jumps": {
+   "count": 8,
+   "expected_vy_pxps": -234.1846,
+   "observed": [
+    {
+     "frame": 79538,
+     "vy_pxps": -234.1846
+    },
+    {
+     "frame": 79747,
+     "vy_pxps": -234.1846
+    },
+    {
+     "frame": 80018,
+     "vy_pxps": -234.1846
+    },
+    {
+     "frame": 80315,
+     "vy_pxps": -234.1846
+    },
+    {
+     "frame": 80614,
+     "vy_pxps": -234.1846
+    },
+    {
+     "frame": 80878,
+     "vy_pxps": -234.1846
+    },
+    {
+     "frame": 81122,
+     "vy_pxps": -234.1846
+    },
+    {
+     "frame": 81348,
+     "vy_pxps": -234.1846
+    }
+   ]
+  },
+  "head_bump_restitution": {
+   "count": 8,
+   "restitution": 0.15,
+   "expected_vy_after_pxps": 18.8535
+  }
+ },
+ "note": "Physics baseline. Do not modify or delete this capture; tests/test_baseline.py verifies hashes and re-checks these results."
+}
