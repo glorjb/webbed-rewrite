@@ -119,15 +119,31 @@ class PlayerMotion(unittest.TestCase):
         if n == 0:
             self.skipTest('no vertical head-bump contact in M* captures')
 
+    LEVEL_DEG = 5.0
+
     def test_walk_plateau_speed(self):
-        """M2: holding a direction on solid ground; plateau |vx| (px/step) vs max_walkspd."""
-        speeds = []
+        """M2: holding a direction on solid LEVEL ground; plateau |vx| (px/step) vs max_walkspd.
+        The recovered speed target is xoff/yoff(max_walkspd*hm, 0, rclamp(ground_angle, -45, 45)), i.e. along the
+        surface: its horizontal share is max_walkspd only on level ground (3.5*cos(27.5 deg) = 3.10 on a 27.5 deg
+        slope). So only frames with |ground_angle| <= 5 deg are compared; sloped walking is reported by
+        tools/reference/analyze_walk.py (code target vs recorded vector) and is INCONCLUSIVE here, because the
+        force gate, clinging and contact friction on slopes are not recovered. Target and tolerance unchanged."""
+        speeds, sloped, no_angle = [], 0, 0
         for s in need('M2'):
             for fr in s.frames:
                 if cap.support(fr) == 'ground' and abs((fr.get('io') or {}).get('hm') or 0) == 1:
+                    a = (fr['player'].get('vars') or {}).get('ground_angle')
+                    if not isinstance(a, (int, float)):
+                        no_angle += 1
+                        continue
+                    if abs(((a + 180.0) % 360.0) - 180.0) > self.LEVEL_DEG:
+                        sloped += 1
+                        continue
                     speeds.append(abs(fr['player']['body']['vel_pxps'][0]) / m.ROOM_SPEED)
         if len(speeds) < 60:
-            self.skipTest('need >= 1 s of walking on solid ground')
+            self.skipTest('INCONCLUSIVE: %d level-ground walking frames (need >= 60); %d sloped frames and %d without '
+                          'ground_angle are not comparable to a horizontal cap (see analyze_walk.py)'
+                          % (len(speeds), sloped, no_angle))
         plateau = sorted(speeds)[int(0.9 * len(speeds))]
         self.assertAlmostEqual(plateau, m.MAX_WALKSPD, delta=0.25,
                                msg='recovered cap target is max_walkspd=3.5 px/step (hypothesis)')

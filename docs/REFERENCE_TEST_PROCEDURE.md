@@ -31,7 +31,214 @@ Hotkeys while recording (the game still receives the keys):
 | **F10** | add a step marker (use where a step below says "marker") |
 | **Ctrl+F12** | finish, save and exit the probe |
 
-## Next recordings: M2, W1, W2, W3 (short version)
+## Automated recording (recommended)
+The automated runner plays the scenarios itself with ordinary keyboard and mouse input, and watches the game
+every frame through the read-only probe above.
+
+**Status (live):**
+- Calibration works against the real game: D, A, SPACE, RMB (weave) and LMB (grapple) are confirmed.
+- Retract is unresolved (see "Retract / pull" below).
+- **No gameplay scenario has passed live yet.** Calibration validates no physics.
+- The first scenario run (2026-10-11) failed for three runner reasons, all addressed below and pending re-test:
+  1. M2 walked off the ground. It needs about 900 px of flat ground, not "15 lengths". It is now checked before
+     walking, and a short variant was added.
+  2. Aiming: `crosshair_tx/ty` don't follow the mouse, and `oIO` has no `aimx/aimy`. Aiming now uses sighting shots.
+  3. False "mouse moved by user": takeover now counts only physical input.
+
+All commands run from the `desktop-playground` folder. They are written in short form below; the full form
+is `powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 <options>`.
+
+**Start-up workflow (2026-10-11, third live run): no Alt+Tab, no Enter.** Start the command in PowerShell and
+leave it. For each new setup the runner:
+1. prints and beeps the spot it needs;
+2. brings Webbed to the front itself. It tries SetForegroundWindow, AttachThreadInput, SwitchToThisWindow, then
+   minimise/restore, and never sends input to another window. If Windows refuses all of them, click Webbed's
+   **title bar**;
+3. waits, while you move the spider there and close any menu, until:
+   - the spider is controllable;
+   - the game isn't paused;
+   - the spider is at rest;
+   - you've let go of mouse and keyboard for 3 s;
+4. beeps once, arms, and starts.
+
+Until that beep, your input and focus changes are allowed (Escape, menus, Alt+Tab). F12 / Pause always stops.
+After the beep: hands off. Touching anything, or leaving the Webbed window, stops the run safely.
+
+**Menus.** Menu objects such as `oSettingsMenu` and `oMenuControllerPrompt` can exist during gameplay, so their
+existence is reported, not treated as "open". The runner waits only on real evidence:
+- a `paused` variable that is set, on any instance;
+- the menu-open indicator measured by `-StateScan`.
+
+If the game is paused in a way the runner can't see, a walk stops after 30 frames (`not_controllable`), and an
+aimed shot is never fired (the aim doesn't respond).
+
+**Analysing walking recordings (including failed ones).**
+`python tools\reference\analyze_walk.py --tests <session dir> [<session dir> ...]` is read-only. It prints:
+- per-frame sampling consistency: a single player id, body equal to instance position, and dx equal to vx·h;
+- each walking-input phase, classified from the game's own variables: moved / blocked / steep / airborne /
+  locked / missing;
+- support transitions;
+- level-ground walking speed against the max_walkspd hypothesis (3.5 px/step);
+- free flight against the verified drag model.
+
+`--tests` runs the regression tests on *copies* of the sessions.
+
+**M2 scenarios.** If an acknowledged walk doesn't move the spider:
+- `blocked`: physics runs (position or velocity changes) but the spider doesn't move. It isn't retried, because
+  the same spot blocks again.
+- `not_controllable`: position and velocity are bit-identical for 30 frames, so the simulation isn't stepping.
+
+`M2_walk_dir` taps right and left to find a free side, then walks 90 frames in that direction only. It needs
+≥ 380 px of clear ground on one side.
+
+**Step by step (recommended order; each step is separate):**
+1. `-SelfTest`: no game needed. It must end with `SELF-TEST OK`.
+2. `-Check`: read-only; it changes no focus and sends no input. It reports a snapshot:
+   - simulation frame rate and whether Webbed is in front;
+   - player control state;
+   - every menu instance with its variables, and every `paused` variable;
+   - readiness.
+2b. `-StateScan`: read-only, about 20 s. Switch to Webbed. At **one** beep open the pause menu (Escape) and leave
+    it open; at **two** beeps close it. It finds the variable that really means "menu open" and saves it to
+    `DesktopPlaygroundLocal\game_state_profile.local.json`; readiness uses it from then on.
+3. `-List`: shows the suites, the keys each needs, and the spot each needs.
+3b. `-AimScan`: **no clicks or keys**. It sweeps the cursor over the window and records every `oIO`/`oPlayer`
+    variable plus the real cursor position. It reports whether any variable follows the mouse, and whether the
+    game moves or locks the cursor.
+3c. `-AimSight`: 3 short grapple taps into the floor next to the spider. It measures where the aim origin is on
+    screen and checks that the shot rays meet.
+4. `-Suite M2`: walking only. It runs `M2_walk_short` (needs about 380 px on each side), then `M2_walk_flat`
+   (needs about 900 px to the right). Each is skipped, with no input sent, if the ground scan says it won't fit.
+5. `-Suite W1`: grapple shot, attach, hang, release; one scenario.
+6. `-Suite W2`: swing both sides, then release at the bottom of the swing; two scenarios at the same spot.
+7. `-Scenario W4_retract_probe`: the retract/pull experiment, described below.
+8. Later: `-Suite W3` (permanent webs). `-All` runs everything in the order M2, W1, W2, W4, W3.
+
+Your confirmed key bindings live in `DesktopPlaygroundLocal\auto_bindings.local.json`:
+- They are reused automatically, so there's no need to calibrate again.
+- `-CalibrateActions retract` re-tests only the actions you name and keeps every other confirmed key.
+- Every save first backs up the previous file as `auto_bindings.local.<time>.bak.json`.
+
+**Aiming in Webbed (relative mouse).** Webbed locks the cursor at the window centre and aims from mouse movement.
+- `-AimScan` measures the game's own aim variables with small cursor impulses, and saves
+  `DesktopPlaygroundLocal\aim_profile.local.json`. It fires nothing.
+- Every aimed scenario then steers that aim state, and checks each real shot's direction.
+- Without a profile, aimed scenarios stop immediately with "run -AimScan first", and fire nothing.
+
+**Ground check (v2).** The scan follows the real (rotated) surfaces of the solid pieces and walks over steps of up
+to 11 px. When a nearby piece has a collision shape it can't model, the scan is *ambiguous*.
+- An ambiguous scan skips the walk, and the message says so.
+- `-GroundScan` shows the model. `-GroundScan -CompareCapture <old capture dir>` checks it, piece by piece,
+  against where the spider really stood in that capture.
+- `-TrustGround` walks anyway. It's a marked diagnostic mode: leaving the ground still stops the scenario, and
+  the result records predicted against actual distance.
+
+**Aiming (sighting, free-cursor games only).** Before each scenario that aims, the runner fires 3 short grapple taps into the floor
+beside the spider. Nothing is recorded during sighting.
+- Each shot's launch direction is recorded, and the shots' lines must meet at one screen point: the aim origin.
+- The real shot is then aimed from that point, and its actual direction is checked: within 5°, or the attempt
+  fails with the measured angles.
+- If the shot directions don't change with the cursor, sighting fails cleanly and asks for `-AimScan`.
+
+**Takeover detection is armed only after** the game has focus, the spider is ready, no menu is open and the game
+isn't paused. So pressing Escape to unpause, or walking the spider into place, is fine until the console prints
+`[takeover detection armed: ...]`. F12 / Pause stop the run in every phase.
+
+**Takeover detection** uses Windows low-level input hooks. Only input that did *not* come from the runner counts:
+- physical mouse movement over 6 px;
+- a physical key press;
+- a click from another program.
+
+The runner tags its own input. The game moving the cursor itself doesn't count, and neither does anything you do
+while the console is waiting for Enter. If the hooks can't be installed, a warning says so, and the old
+cursor-position check is used.
+
+**During a run:**
+- Before each suite the console describes the spot it needs. Walk the spider there in the game, switch back
+  to the console and press Enter (`s` skips the suite, `q` quits).
+- The runner then brings the game to the front itself. If Windows refuses, it asks you to click the game's
+  **title bar**. Don't click inside the game: that would shoot a web.
+- Then **don't touch the mouse or keyboard** until the console says the suite is done.
+- **Emergency stop: F12 or Pause/Break**. This works even while the runner is waiting for the game window.
+  Alt-Tabbing away or moving the mouse during a scenario also stops the run.
+- Every held key and button is released on any stop. The runner restores focus only between suites, never
+  silently in the middle of a scenario.
+
+**Readiness:** before a run and before each scenario, the spider must be in a level, controllable, and
+**at rest**: |v| < 1 px/s for 30 consecutive frames. The runner waits up to 20 s.
+- If the spider doesn't settle, the run **stops** with the measured speed, for example
+  `longest still run 12 frames; |v| ... 1.4..2.3 px/s (support=web)`. It never continues after a failed check.
+- Moving platforms, webs and slopes can keep the body moving; stand on solid, level ground.
+
+| Suite | What it does (scenario IDs) | Spot needed |
+|---|---|---|
+| **M2** | right 1.5 s / stop / left 1.5 s / stop, then mirrored (`M2_walk_short`); walk right 4 s, stop 2 s, walk left 4 s, stop 2 s (`M2_walk_flat`) | flat solid ground: ≥ 380 px clear on **both** sides (short), ≥ 900 px clear to the right (flat) |
+| **W1** | aims straight up, shoots, hangs 8 s, releases, lands (`W1_attach_hang`) | ceiling/branch 4–8 spider-lengths straight above |
+| **W2** | swings at 45° right and left (`W2_swing`); releases at the bottom of the swing, 3× (`W3_cut_mid_swing`) | ceiling reachable at 45° on both sides, open space below |
+| **W4** | retract/pull experiment (`W4_retract_probe`); then `W4_pull`, which is **skipped** until a retract key is confirmed | ceiling 6–10 lengths away at ~60° up-right; for `W4_pull`, a wall ~6 lengths away at ~20° |
+| **W3** | weaves a permanent web, watches it, loads it (`W5_weave_line`); weaves and jerks it to provoke a snap (`W5_weave_snap`) | a wall 4–8 lengths away at ~20° up-right, open space to the left |
+
+**Retract / pull (open question).** Live calibration found no key that changes `oIO.retract`. There are two
+likely reasons, neither confirmed yet:
+- `oIO` may not have a `retract` variable at all. The probe reports only variables that exist on the instance.
+  Calibration now says this explicitly: "oIO has no variable retract".
+- In the recovered grapple code, the pull strength (oPlayer_Step_0 L661–L677) branches on **weave**. So pulling
+  may be grapple + RMB, not a separate button. The player variable `retract` is reset when a shot is fired.
+
+`W4_retract_probe` measures it:
+1. It attaches a grapple and keeps LMB held.
+2. It presses each key from `auto_bindings.json` → `retract_probe` (RMB, W, S, UP, DOWN, SHIFT, CTRL, E, Q, R,
+   F, MMB) for 1 s each.
+3. It records which `oIO` and player variables change, and whether the rope distance starts shrinking or growing
+   compared with grapple-only.
+
+This also answers whether the control needs an active grapple. Send the report: the `retract_probe` block lists
+each key's effect. It's an experiment. A key that shortens the rope is only a *candidate* until the decoded
+code agrees.
+
+**If a scenario fails,** run this on the failed recording and send the output. It's short text, so you don't need
+to export the capture:
+`python tools\reference\diagnose_capture.py "C:\Users\profe\DesktopPlaygroundLocal\captures_failed\<session>"`
+
+It prints:
+- the runner's reason and measurements;
+- the pre-walk ground scan and the sighting;
+- the input log;
+- the support timeline (ground, web or air);
+- a frame table around every moment the spider lost its footing.
+
+For the first M2 failure:
+`python tools\reference\diagnose_capture.py "C:\Users\profe\DesktopPlaygroundLocal\captures_failed\M2_walk_flat_20261011-041930"`
+
+For each scenario the runner:
+1. waits until the spider is ready;
+2. records automatically (same files as `record.ps1`, in `DesktopPlaygroundLocal\captures\`);
+3. checks that every input reached the game, that the expected things happened (shot, attachment, release,
+   landing, new web), that frames are consistent (no respawn, no room change), and that the capture passes the
+   quality gate.
+
+It retries transient failures once. Failed recordings are **kept** in `DesktopPlaygroundLocal\captures_failed\`
+with `auto_run.json` explaining why, out of `captures\` so they don't break the tests. Existing captures,
+including the M3 baseline, are never modified.
+
+At the end it runs the full test suite and writes `DesktopPlaygroundLocal\auto_runs\<time>\report.md`, which
+contains:
+- calibration results, if any;
+- per scenario: the result, the measured input latency (frames), and observations (walk plateau and stop
+  times, attach and release frames, the release mode, aim accuracy, the retract-probe table);
+- the relevant tests.
+
+The verdict line never says "passed" when nothing was recorded. Exit codes:
+- 0: every scenario that ran passed, and the tests are clean;
+- 1: failures;
+- 2: not ready / not started;
+- 3: aborted;
+- 4: nothing recorded (calibration only, or everything skipped).
+
+The runner sends inputs through Windows exactly like a real keyboard and mouse. It never writes to the game's
+memory. Timing is measured from what the game itself saw, and is reported, not assumed.
+
+## Next recordings: M2, W1, W2, W3 (short version, manual)
 Before each recording: be in a level on **solid ground** (`-Check` says READY and `support=ground`), away from
 existing webs. Then run `record.ps1 -Scenario <ID>`, press F9, do the steps, press F9, then Ctrl+F12, and check
 it prints `OK`.
@@ -41,7 +248,7 @@ it prints `OK`.
 | **M2_walk_flat** | On long flat ground: hold **right** 4 s, release 2 s, hold **left** 4 s, release 2 s. |
 | **W1_attach_hang** | Under a ceiling about 4–8 spider-lengths up: shoot one web straight up and hang without input for 8 s. Then release it and let the spider fall to the ground. |
 | **W2_swing** | Shoot a web diagonally ahead (about 45°) and swing with no input for 8 s, then release. Repeat once on the other side. |
-| **W3_release_mid_swing** | Shoot diagonally, swing 3 s, **release** the web at the bottom of the swing, and land. Repeat 3 times. |
+| **W3_cut_mid_swing** | Shoot diagonally, swing 3 s, **release** the web at the bottom of the swing, and land. Repeat 3 times. |
 
 These check:
 - that the web-shot projectile follows the recovered code exactly (velocity, position, 35 px/step launch speed);

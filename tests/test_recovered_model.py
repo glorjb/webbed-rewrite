@@ -107,5 +107,23 @@ class Webs(unittest.TestCase):
         self.assertAlmostEqual(m.snap_pitch(0.5), 75.0)
 
 
+class Walking(unittest.TestCase):
+    def test_target_velocity_follows_the_ground_angle(self):
+        # xoff/yoff(3.5 * hm, 0, rclamp(angle, -45, 45)) = 3.5 * hm * (dcos a, dsin a)
+        vx, vy = m.walk_target_velocity(1, 0)
+        self.assertAlmostEqual((vx, vy), (3.5, 0.0))
+        vx, vy = m.walk_target_velocity(-1, -27.5)
+        self.assertAlmostEqual(vx, -3.5 * math.cos(math.radians(27.5)))     # -3.1045: horizontal share on a slope
+        self.assertAlmostEqual(vy, 3.5 * math.sin(math.radians(27.5)))
+        self.assertAlmostEqual(math.hypot(*m.walk_target_velocity(1, 60)), 3.5)   # clamped to 45, magnitude kept
+        self.assertAlmostEqual(m.walk_target_velocity(1, 60)[1], 3.5 * math.sin(math.radians(45)))
+        self.assertAlmostEqual(m.walk_target_velocity(1, 350)[1], 3.5 * math.sin(math.radians(-10)))
+
+    def test_force_only_velocity_change(self):
+        # 10 N on 0.5 * pi * 0.33^2 kg = 58.46 m/s^2 -> per step 0.97436 m/s = 32.479 px/s = 0.54131 px/step
+        self.assertAlmostEqual(m.walk_force_dv_per_step(), 10 / (0.5 * math.pi * 0.33 ** 2) / 0.03 / 3600, places=9)
+        self.assertAlmostEqual(m.walk_force_dv_per_step(), 0.54131, places=4)
+
+
 if __name__ == '__main__':
     unittest.main()
