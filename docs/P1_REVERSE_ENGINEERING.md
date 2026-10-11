@@ -180,6 +180,7 @@ Do not merge the two into a generic rope.
 | Pull strength `P` (L661–L677) | the weave branch starts with `weave_pull_power · clamp(d/10, 0, 1)` (L661, L666 hand-verified); the further terms on L667–L677 are **unresolved**; `pull_power = 5` exists in `init_spider_variables` | **Unknown** |
 | Near-anchor regime | `d ≤ 16`: no pull force from this block | High (structure) |
 | Attachment / release transitions | which variable flips on attach (`attached`, `grapple`, `webshot_node`), and whether release happens on button-up or by toggle | **Unknown.** The automated W1/W2 runs log every change of these variables frame by frame and record the observed release mode |
+| Aim point (live, 2026-10-11) | `player.crosshair_tx/ty` stayed constant while the cursor moved (the firing code reads them, so they are probably written only when firing; not verified), and `aimx`/`aimy` are not variables of `oIO`. Neither is used as feedback any more. The runner aims with **sighting shots**: each shot's launch vector `(gh, gv)` (or `(gx − sx, gy − sy)`, if `gh/gv` are cleared on attaching) gives a screen-space ray through the cursor position. With a uniform-scale view, ≥ 3 rays meet at the shot origin's screen position (least squares, with the residual as a check), and every real shot's direction is verified afterwards. `-AimScan` dumps every `oIO`/`oPlayer` variable against the cursor to find a real tracking variable, if one exists | **Unknown** (aim variable); the sighting method relies only on the lifted firing formula (High) plus the view assumption, which the residual tests |
 | Retract / pull control | Live calibration (2026-10-11): none of SHIFT, S, CTRL, DOWN, MMB changed `oIO.retract`. `retract` has one global variable ID (101181), but YYC IDs are per *name*, so that does not show `oIO` owns it, and the probe returns only variables that exist on the instance. The player's `retract` is reset to 0 on firing (L183–L219); the pull-strength block (L661–L677) branches on **weave** | **Unknown.** Hypotheses: (a) `oIO` has no `retract`; (b) pulling = grapple + weave. `W4_retract_probe` measures each candidate key's effect on `oIO`, player variables and rope length while a grapple is held |
 
 `tools/reference/analyze_grapple.py` measures `P` from W* captures without decoding it:
@@ -461,7 +462,7 @@ retract key is confirmed; W3 (permanent webs) → `W5_weave_line`, `W5_weave_sna
 - **Not automated:** cutting a permanent web (control not recovered); skateboard scenarios.
 
 **Verification status:**
-- 34 runner unit tests pass against `autoref/mock.py`, a fake game with crude dynamics. It is **not** the
+- 56 runner unit tests pass against `autoref/mock.py`, a fake game with crude dynamics. It is **not** the
   recovered physics, and its output is never written to the real capture root. They cover:
   - the happy path and probe-compatible files;
   - missed inputs with retries and preservation;
@@ -492,7 +493,25 @@ retract key is confirmed; W3 (permanent webs) → `W5_weave_line`, `W5_weave_sna
   - the suite reported 53 pass, 0 fail, 9 skip.
 - Not done:
   - retract is unresolved;
-  - **no gameplay scenario has been recorded live**;
+  - **no gameplay scenario has passed live**;
   - walking, grapple, pulling and permanent-web physics remain **unvalidated**.
-- **The Windows input driver and the live provider have not been run against Webbed yet.**
-- Mock latencies are synthetic; real input latency and hold accuracy will be reported by the first live run.
+- The live provider and the input driver did run against Webbed (calibration and the scenario attempts
+  below). Real input latency and hold accuracy will come from the first passing scenarios.
+
+**First live scenario run (2026-10-11): runner failures, fixed in the runner (not in the model):**
+- **M2 `setup_invalid` (left the ground).** The scenario walks about 840 px at 3.5 px/step, but its setup text asked
+  for "15 spider-lengths". Fixes:
+  - a read-only ground scan (`groundscan.py`: solid instances' sprite boxes, an estimate) checks the clear
+    distance *before* any input;
+  - `M2_walk_short` (90-frame holds, about 380 px on each side) was added;
+  - the failure now reports the distance walked, the position, the velocity and the last ground instance;
+  - `diagnose_capture.py` summarises the preserved capture.
+
+  The actual cause still has to be confirmed from that capture.
+- **W1/W4 `aim_failed`.** No usable feedback variable exists (see the 6b "Aim point" row). Replaced by sighting
+  shots plus a direction check on every real shot. `-AimScan` / `-AimSight` diagnostics were added.
+- **False "mouse moved by user".** The detector compared the cursor with where the runner had put it. That breaks
+  when the game moves or locks the cursor; it is the likely cause, and `-AimScan` measures it. Takeover now uses
+  low-level hooks: the runner's input is tagged (`dwExtraInfo`), and only physical input (or another program's
+  keys and clicks) counts. Detection is armed only while the runner owns the game. F12/Pause, focus loss and the
+  watchdog are unchanged.

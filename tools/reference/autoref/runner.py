@@ -21,12 +21,13 @@ import subprocess
 import sys
 import time
 
+from . import aim as A
 from . import bindings as B
 from . import state as S
 from .capture import SessionWriter
 from .driver import AbortRun, SafetyGuard
 from .provider import GameLost
-from .scenarios import ACK_FRAMES, SCENARIOS, SUITES, Ctx, ScenarioFailure
+from .scenarios import ACK_FRAMES, SCENARIOS, SIGHT_ANGLES, SUITES, Ctx, ScenarioFailure, sight
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RETRYABLE = {'missed_input', 'capture_invalid', 'inconsistent', 'timeout', 'aim_failed'}
@@ -54,6 +55,7 @@ class Config:
         self.failed_root = os.path.join(parent, 'captures_failed')
         self.runs_root = os.path.join(parent, 'auto_runs')
         self.bindings_file = bindings_file or os.path.join(parent, 'auto_bindings.local.json')
+        self.aim_profile_file = os.path.join(parent, 'aim_profile.local.json')
         self.retries, self.prompt, self.run_tests = retries, prompt, run_tests
         self.mouse_failsafe, self.mode = mouse_failsafe, mode
 
@@ -85,6 +87,7 @@ class Runner:
         self.last_row = None
         self.io_keys_seen = set()       # oIO variables that actually exist (the probe returns only present ones)
         self.calibration = None         # per-action calibration report (for the run report)
+        self.aim_profile = self._load_aim_profile()
 
     # ---------------------------------------------------------------- frame loop
     def frame(self, writer=None, marker=0):
@@ -161,10 +164,20 @@ class Runner:
         """Bring the game to the foreground at a phase boundary (start, after a prompt). Never mid-scenario:
         a focus change during a scenario is treated as a user takeover and aborts. Nothing is held while
         focusing, and the emergency stop is polled throughout (driver.focus_game)."""
+        self.d.disarm()
         self.d.release_all()
         if not self.d.focus_game():
             raise AbortRun('could not bring the Webbed window to the foreground; click its TITLE BAR (not inside '
                            'the window, which would fire a web) and run again')
+        self.d.arm()                    # takeover detection from now on (physical input only; see inputhook.py)
+
+    def _load_aim_profile(self):
+        try:
+            with open(self.cfg.aim_profile_file) as f:
+                prof = json.load(f)
+            return prof if prof.get('feedback_pair') else None
+        except (OSError, ValueError):
+            return None
 
     # ---------------------------------------------------------------- calibration
     CAL_ORDER = ('right', 'left', 'jump', 'retract', 'weave', 'grapple')
@@ -267,6 +280,34 @@ class Runner:
         if reasons:
             res['failure'] = {'kind': 'not_ready', 'msg': '; '.join(reasons)}
             return res
+        if sc.space:                    # setup validation BEFORE any input: is there enough walkable ground?
+            prof = self.p.ground_profile(self.last_row)
+            res['ground_profile'] = prof
+            if prof.get('confidence') == 'estimate':
+                short = {d: (prof[d]['clear_px'], need) for d, need in sc.space.items()
+                         if prof.get(d) and prof[d]['clear_px'] < need}
+                if short:
+                    res['status'] = 'skipped'
+                    res['failure'] = {'kind': 'insufficient_space', 'msg': 'nothing sent: estimated clear ground %s '
+                                      '(have, need px); move to a longer flat area' % short}
+                    return res
+            else:
+                self.ui.say('     ground scan unavailable (%s); walking without a pre-check' % prof.get('reason'))
+        aimer, aim_sources = None, None
+        if sc.aim:
+            if self.aim_profile:
+                pair = self.aim_profile['feedback_pair']
+                (sx, vx), (sy, vy) = (pair[0].split('.', 1), pair[1].split('.', 1))
+                aim_sources = [(sx, vx, vy)] if sx == sy else None
+            if not aim_sources:
+                sres = self._sight(res)
+                if sres is None:
+                    return res
+                aimer = sres
+                reasons = self.wait_ready(sc.support)
+                if reasons:
+                    res['failure'] = {'kind': 'not_ready', 'msg': 'after sighting: ' + '; '.join(reasons)}
+                    return res
         name = self._new_session_name(sc.id)
         path = os.path.join(self.cfg.capture_root, name)
         meta = self.p.meta()
@@ -277,6 +318,9 @@ class Runner:
         writer.start_segment()
         ctx = Ctx(self.d, self.b, log=writer.log)
         ctx.row = self.last_row
+        ctx.aimer, ctx.aim_sources = aimer, aim_sources
+        if aimer is not None:
+            writer.log(dict(event='sighting_used', P=aimer.P, **aimer.sighting))
         issues = []
         fatal = None
         t0 = time.time()
@@ -323,6 +367,81 @@ class Runner:
             raise fatal
         return res
 
+    def _sight(self, res):
+        """Pre-recording sighting shots (unrecorded; logged in the result). Returns a SightedAim or None."""
+        self.ui.say('     sighting: %d short grapple taps into the floor to locate the aim origin on screen'
+                    % len(SIGHT_ANGLES))
+        ctx = Ctx(self.d, self.b)
+        ctx.row = self.last_row
+        box = {}
+
+        def gen():
+            box['aimer'] = yield from sight(ctx)
+        try:
+            self.drive(gen(), ctx, max_frames=2400)
+        except ScenarioFailure as e:
+            self.d.release_all()
+            res['failure'] = {'kind': e.kind, 'msg': e.msg}
+            res['sighting'] = (ctx.obs.get('sighting') or [None])[-1]
+            return None
+        finally:
+            self.d.release_all()
+        res['sighting'] = box['aimer'].sighting
+        self.ui.say('     sighting OK: aim origin at client %s (ray rms %.2f px)' % (
+            [round(v) for v in box['aimer'].P], box['aimer'].sighting['fit']['rms_px']))
+        return box['aimer']
+
+    # ---------------------------------------------------------------- aim diagnostics
+    def aim_scan(self, out_dir, hold=12):
+        """Diagnostic, fires nothing: move the cursor over a grid (absolute) and in small steps (relative); at the
+        end of every hold record the requested and actual cursor, Windows' cursor state and EVERY numeric instance
+        variable of oIO and oPlayer. Writes aimscan.jsonl + aimscan_report.json and returns the analysis."""
+        self.ensure_ready('any', 'aim scan')
+        w, h = self.d.client_size()
+        pts = [(w * fx, h * fy) for fy in (0.2, 0.4, 0.6, 0.8) for fx in (0.15, 0.35, 0.5, 0.65, 0.85)]
+        rel = [(40, 0), (0, 40), (-40, 0), (0, -40)] * 2
+        os.makedirs(out_dir, exist_ok=True)
+        samples = []
+        with open(os.path.join(out_dir, 'aimscan.jsonl'), 'w') as f:
+            def record(req, phase):
+                for _ in range(hold):
+                    row = self.frame()
+                sample = {'phase': phase, 'req': req, 'cur': self.d.cursor_client(), 'frame': row['frame'],
+                          'body': (S.body(row) or {}).get('pos_px'),
+                          'vars': dict([('player.' + k, v) for k, v in self.p.all_vars('player').items()] +
+                                       [('io.' + k, v) for k, v in self.p.all_vars('io').items()])}
+                samples.append(sample)
+                f.write(json.dumps(dict(sample, cursor_state=self.d.cursor_state()), default=str) + '\n')
+            for p in pts:
+                self.d.move_mouse(*p)
+                record(list(p), 'absolute')
+            self.d.move_mouse(w / 2.0, h / 2.0)
+            record([w / 2.0, h / 2.0], 'absolute')
+            for dx, dy in rel:
+                self.d.move_mouse_relative(dx, dy)
+                record(None, 'relative')
+        analysis = A.analyze_aimscan(samples)
+        analysis['cursor_state_at_end'] = self.d.cursor_state()
+        analysis['hooks'] = getattr(self.d, 'hook_ok', None)
+        analysis['takeover_monitor_counts'] = getattr(getattr(self.d, 'monitor', None), 'counts', None)
+        with open(os.path.join(out_dir, 'aimscan_report.json'), 'w') as f:
+            json.dump(analysis, f, indent=1, default=str)
+        if analysis.get('feedback_pair'):
+            prof = {'feedback_pair': analysis['feedback_pair'], 'measured': stamp(),
+                    'followers': analysis['followers'][:6], 'note': 'from -AimScan; shots are still direction-checked'}
+            with open(self.cfg.aim_profile_file, 'w') as f:
+                json.dump(prof, f, indent=1)
+            self.aim_profile = prof
+        return analysis
+
+    def aim_sight(self):
+        """Diagnostic: only the sighting (3 grapple taps into the floor). Returns the sighting result."""
+        self.ensure_ready('ground', 'aim sighting')
+        res = {}
+        aimer = self._sight(res)
+        return {'ok': aimer is not None, 'P': aimer.P if aimer else None, 'sighting': res.get('sighting'),
+                'failure': res.get('failure')}
+
     def _quality(self, path):
         sys.path.insert(0, os.path.join(HERE, '..', '..', '..', 'tests'))
         import capture_lib as cap
@@ -366,6 +485,7 @@ class Runner:
                 if sc.setup != last_setup and 'Same spot' not in sc.setup:
                     self.ui.say('')
                     self.ui.say('[%s] %s  setup: %s' % (suite, sid, sc.setup))
+                    self.d.disarm()            # the user is about to use mouse and keyboard
                     ans = self.ui.ask('Position the spider (standing still), then switch back here.')
                     if ans == 'q':
                         stop = True
@@ -468,6 +588,12 @@ def verdict(results, run_info):
             sum(1 for a in acts.values() if a['status'] in ('confirmed', 'kept') and a.get('key')),
             sum(1 for a in acts.values() if a['status'] in ('unresolved', 'not attempted') or not a.get('key')),
             ', '.join(sorted(k for k, a in acts.items() if not a.get('key'))) or 'none'))
+    if run_info.get('aim_scan'):
+        parts.append('aim scan: %s' % run_info['aim_scan'].get('recommendation'))
+    if run_info.get('aim_sight'):
+        r = run_info['aim_sight']
+        parts.append('aim sighting %s' % ('OK, origin %s' % [round(v) for v in r['P']] if r['ok'] else
+                                          'FAILED: %s' % (r.get('failure') or {}).get('msg')))
     if not results:
         parts.append('NO gameplay scenarios were run or recorded')
     elif ok == 0 and failed == 0:

@@ -38,7 +38,12 @@ every frame through the read-only probe above.
 **Status (live):**
 - Calibration works against the real game: D, A, SPACE, RMB (weave) and LMB (grapple) are confirmed.
 - Retract is unresolved (see "Retract / pull" below).
-- No gameplay scenario has been recorded live yet. Calibration validates no physics.
+- **No gameplay scenario has passed live yet.** Calibration validates no physics.
+- The first scenario run (2026-10-11) failed for three runner reasons, all addressed below and pending re-test:
+  1. M2 walked off the ground. It needs about 900 px of flat ground, not "15 lengths". It is now checked before
+     walking, and a short variant was added.
+  2. Aiming: `crosshair_tx/ty` don't follow the mouse, and `oIO` has no `aimx/aimy`. Aiming now uses sighting shots.
+  3. False "mouse moved by user": takeover now counts only physical input.
 
 All commands run from the `desktop-playground` folder. They are written in short form below; the full form
 is `powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 <options>`.
@@ -47,7 +52,13 @@ is `powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 <op
 1. `-SelfTest`: no game needed. It must end with `SELF-TEST OK`.
 2. `-Check`: in a level, standing on solid ground. It sends no input and must say `readiness: READY`.
 3. `-List`: shows the suites, the keys each needs, and the spot each needs.
-4. `-Suite M2`: walking only; one scenario.
+3b. `-AimScan`: **no clicks or keys**. It sweeps the cursor over the window and records every `oIO`/`oPlayer`
+    variable plus the real cursor position. It reports whether any variable follows the mouse, and whether the
+    game moves or locks the cursor.
+3c. `-AimSight`: 3 short grapple taps into the floor next to the spider. It measures where the aim origin is on
+    screen and checks that the shot rays meet.
+4. `-Suite M2`: walking only. It runs `M2_walk_short` (needs about 380 px on each side), then `M2_walk_flat`
+   (needs about 900 px to the right). Each is skipped, with no input sent, if the ground scan says it won't fit.
 5. `-Suite W1`: grapple shot, attach, hang, release; one scenario.
 6. `-Suite W2`: swing both sides, then release at the bottom of the swing; two scenarios at the same spot.
 7. `-Scenario W4_retract_probe`: the retract/pull experiment, described below.
@@ -57,6 +68,22 @@ Your confirmed key bindings live in `DesktopPlaygroundLocal\auto_bindings.local.
 - They are reused automatically, so there's no need to calibrate again.
 - `-CalibrateActions retract` re-tests only the actions you name and keeps every other confirmed key.
 - Every save first backs up the previous file as `auto_bindings.local.<time>.bak.json`.
+
+**Aiming (sighting).** Before each scenario that aims, the runner fires 3 short grapple taps into the floor
+beside the spider. Nothing is recorded during sighting.
+- Each shot's launch direction is recorded, and the shots' lines must meet at one screen point: the aim origin.
+- The real shot is then aimed from that point, and its actual direction is checked: within 5°, or the attempt
+  fails with the measured angles.
+- If the shot directions don't change with the cursor, sighting fails cleanly and asks for `-AimScan`.
+
+**Takeover detection** uses Windows low-level input hooks. Only input that did *not* come from the runner counts:
+- physical mouse movement over 6 px;
+- a physical key press;
+- a click from another program.
+
+The runner tags its own input. The game moving the cursor itself doesn't count, and neither does anything you do
+while the console is waiting for Enter. If the hooks can't be installed, a warning says so, and the old
+cursor-position check is used.
 
 **During a run:**
 - Before each suite the console describes the spot it needs. Walk the spider there in the game, switch back
@@ -77,7 +104,7 @@ Your confirmed key bindings live in `DesktopPlaygroundLocal\auto_bindings.local.
 
 | Suite | What it does (scenario IDs) | Spot needed |
 |---|---|---|
-| **M2** | walk right 4 s, stop 2 s, walk left 4 s, stop 2 s (`M2_walk_flat`) | flat solid ground, ≥ 15 spider-lengths clear to the right |
+| **M2** | right 1.5 s / stop / left 1.5 s / stop, then mirrored (`M2_walk_short`); walk right 4 s, stop 2 s, walk left 4 s, stop 2 s (`M2_walk_flat`) | flat solid ground: ≥ 380 px clear on **both** sides (short), ≥ 900 px clear to the right (flat) |
 | **W1** | aims straight up, shoots, hangs 8 s, releases, lands (`W1_attach_hang`) | ceiling/branch 4–8 spider-lengths straight above |
 | **W2** | swings at 45° right and left (`W2_swing`); releases at the bottom of the swing, 3× (`W3_cut_mid_swing`) | ceiling reachable at 45° on both sides, open space below |
 | **W4** | retract/pull experiment (`W4_retract_probe`); then `W4_pull`, which is **skipped** until a retract key is confirmed | ceiling 6–10 lengths away at ~60° up-right; for `W4_pull`, a wall ~6 lengths away at ~20° |
@@ -100,6 +127,20 @@ likely reasons, neither confirmed yet:
 This also answers whether the control needs an active grapple. Send the report: the `retract_probe` block lists
 each key's effect. It's an experiment. A key that shortens the rope is only a *candidate* until the decoded
 code agrees.
+
+**If a scenario fails,** run this on the failed recording and send the output. It's short text, so you don't need
+to export the capture:
+`python tools\reference\diagnose_capture.py "C:\Users\profe\DesktopPlaygroundLocal\captures_failed\<session>"`
+
+It prints:
+- the runner's reason and measurements;
+- the pre-walk ground scan and the sighting;
+- the input log;
+- the support timeline (ground, web or air);
+- a frame table around every moment the spider lost its footing.
+
+For the first M2 failure:
+`python tools\reference\diagnose_capture.py "C:\Users\profe\DesktopPlaygroundLocal\captures_failed\M2_walk_flat_20261011-041930"`
 
 For each scenario the runner:
 1. waits until the spider is ready;

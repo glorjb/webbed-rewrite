@@ -14,10 +14,14 @@ Scenario IDs follow docs/REFERENCE_TEST_PROCEDURE.md so the existing tests pick 
 """
 import math
 
+from . import aim as A
 from . import bindings as B
 from . import state as S
 
 ACK_FRAMES = 8               # oIO must reflect a press/release within this many game frames
+AIM_CHECK_TOL_DEG = 5.0      # a real shot must leave within this angle of the intended direction
+SIGHT_ANGLES = (240, 300, 270)   # sighting shots go into the floor next to the spider (short, no swing)
+SIGHT_RMS_MAX_PX = 4.0       # rays must meet within this (client px) or the uniform-view assumption fails
 LEAD_IN_FRAMES = 30          # recorded at rest before the first input (onset reference)
 GRAVITY_DV = 10 / 0.03 / 60  # px/s per step (sim/webbed_model.gravity_dv_pxps_per_step)
 
@@ -43,6 +47,8 @@ class Ctx:
         self.transitions = []            # (frame, scope, var, old, new)
         self.obs = {}                    # scenario observations (measured, not asserted)
         self.track_transitions = False
+        self.aimer = None                # SightedAim from the pre-scenario sighting, or None
+        self.aim_sources = None          # feedback sources verified by -AimScan, or None (defaults)
 
     # ---------------------------------------------------------------- called by the runner each frame
     def observe(self, row):
@@ -139,10 +145,18 @@ class Ctx:
             return tr.settled and (need_support is None or S.support(r) is not None)
         return (yield from self.wait_until(ok, timeout, kind=None))
 
-    # aim feedback sources, tried in order: the player's crosshair target, then the input object's aim point
+    # feedback sources tried when no verified source exists. NOT valid in Webbed (live 2026-10-11:
+    # crosshair_tx/ty static, oIO has no aimx/aimy); kept as the last resort behind sighting.
     AIM_SOURCES = (('player', 'crosshair_tx', 'crosshair_ty'), ('io', 'aimx', 'aimy'))
 
-    def aim(self, angle_deg, radius_px=160, tol_deg=2.0, max_iter=8):
+    def aim(self, angle_deg):
+        """Point the game's aim at `angle_deg`: sighted placement when a sighting was done for this spot,
+        otherwise closed loop on aim-scan-verified feedback variables (or the unverified defaults)."""
+        if self.aimer is not None:
+            return (yield from self.aimer.aim(self, angle_deg))
+        return (yield from self.aim_feedback(angle_deg))
+
+    def aim_feedback(self, angle_deg, radius_px=160, tol_deg=2.0, max_iter=8):
         """Closed-loop aim: move the mouse until the game's own aim point (player crosshair_tx/ty, or oIO
         aimx/aimy if the crosshair does not follow the mouse) lies in direction `angle_deg` (GameMaker degrees,
         0 = right, 90 = up) from the player's body. The screen->room mapping is measured, never assumed."""
@@ -176,7 +190,7 @@ class Ctx:
         m = [w / 2.0, h / 2.0]
         step = max(20.0, min(w, h) / 16.0)
         tried = []
-        for source in self.AIM_SOURCES:
+        for source in (self.aim_sources or self.AIM_SOURCES):
             src[0] = source
             if read(self.row) is None:
                 tried.append('%s.%s/%s unreadable' % source)
@@ -221,16 +235,125 @@ class Ctx:
         return a
 
 
+class SightedAim:
+    """Aim from a measured screen position P of the shot origin (see aim.py): cursor at P + R * dir(theta)."""
+    def __init__(self, P, sighting):
+        self.P, self.sighting = P, sighting
+
+    def aim(self, ctx, angle_deg):
+        size = ctx.driver.client_size()
+        r = A.best_radius(self.P, angle_deg, size)
+        if r is None:
+            raise ScenarioFailure('aim_failed', 'aiming at %.0f deg from the spider\'s screen position %s leaves the '
+                                  'game window' % (angle_deg, [round(v) for v in self.P]))
+        m = A.cursor_for_angle(self.P, angle_deg, r, size)
+        ctx.driver.move_mouse(*m)
+        yield from ctx.wait(4)                     # let the game read the cursor (acknowledged by the shot check)
+        ctx.log({'event': 'aim', 'method': 'sighted', 'target_deg': angle_deg, 'P': self.P, 'radius': r,
+                 'mouse_client': [round(m[0], 1), round(m[1], 1)]})
+        ctx.note('aim', {'target_deg': angle_deg, 'method': 'sighted', 'radius_px': r})
+        return angle_deg
+
+
+def check_shot_direction(ctx, intended, what='shot'):
+    """After a shot fired: its launch vector (player gh, gv) must point within AIM_CHECK_TOL_DEG of `intended`."""
+    sd = A.shot_direction(S.pvars(ctx.row))
+    if sd is None:
+        ctx.note('aim_check', {'intended_deg': intended, 'actual_deg': None, 'note': 'gh/gv not readable'})
+        return None
+    err = A.angle_diff(sd[1], intended)
+    ctx.note('aim_check', {'intended_deg': intended, 'actual_deg': round(sd[1], 2), 'error_deg': round(err, 2)})
+    if abs(err) > AIM_CHECK_TOL_DEG:
+        raise ScenarioFailure('aim_failed', 'the %s left at %.1f deg, intended %.0f deg (error %.1f deg > %.0f)'
+                              % (what, sd[1], intended, err, AIM_CHECK_TOL_DEG))
+    return sd[1]
+
+
+def sight(ctx, angles=SIGHT_ANGLES, radius=110, guess=None):
+    """Sighting: fire short grapple taps into the floor with the cursor at known client points and intersect
+    the shot directions (aim.ray_intersection). Returns a SightedAim; raises aim_failed with the measured rays
+    when they do not meet (relative / hidden-cursor aim, non-uniform view, or aim assist)."""
+    size = ctx.driver.client_size()
+    P0 = guess or (size[0] / 2.0, size[1] / 2.0)
+    rays, shots = [], []
+    for a in angles:
+        m = A.cursor_for_angle(P0, a, radius, size) or (max(3, min(size[0] - 3, P0[0])),
+                                                        max(3, min(size[1] - 3, P0[1] + radius)))
+        ctx.driver.move_mouse(*m)
+        yield from ctx.wait(4)
+        ctx.press('grapple')
+        yield from ctx.await_ack('grapple', True)
+        n = yield from ctx.wait_until(lambda r: S.live_shot(r) or S.grapple_engaged(r), 10, kind=None)
+        if n is None:
+            ctx.release('grapple')
+            raise ScenarioFailure('aim_failed', 'sighting: grapple acknowledged by oIO but no shot fired')
+        sd = A.shot_direction(S.pvars(ctx.row))
+        pv = S.pvars(ctx.row)
+        shots.append({'cursor': [round(m[0], 1), round(m[1], 1)], 'angle_deg': round(sd[1], 2) if sd else None,
+                      'sx': pv.get('sx'), 'sy': pv.get('sy'), 'body': (S.body(ctx.row) or {}).get('pos_px')})
+        ctx.release('grapple')
+        yield from ctx.await_ack('grapple', False)
+        done = yield from ctx.wait_until(lambda r: not S.live_shot(r) and not S.grapple_engaged(r), 60, kind=None)
+        if done is None:                           # toggle-style release: one tap
+            ctx.press('grapple')
+            yield from ctx.await_ack('grapple', True)
+            ctx.release('grapple')
+            yield from ctx.await_ack('grapple', False)
+            yield from ctx.wait_until(lambda r: not S.live_shot(r) and not S.grapple_engaged(r), 60,
+                                      'release_failed', 'sighting: could not detach from the sighting shot')
+        yield from ctx.settle(300)
+        if sd is None:
+            raise ScenarioFailure('aim_failed', 'sighting: shot fired but gh/gv were not readable')
+        rays.append((m[0], m[1], sd[0][0], sd[0][1]))
+    fit = A.ray_intersection(rays)
+    result = {'shots': shots, 'fit': {k: (list(v) if isinstance(v, tuple) else v) for k, v in fit.items()}}
+    ctx.note('sighting', result)
+    ctx.log(dict(event='sighting', **result))
+    if fit.get('P') is None:
+        raise ScenarioFailure('aim_failed', 'sighting: shot direction did not change with the cursor position '
+                              '(spread %.1f deg): the game does not aim at the absolute cursor; run -AimScan'
+                              % fit['spread_deg'])
+    w, h = size
+    P = fit['P']
+    if fit['rms_px'] > SIGHT_RMS_MAX_PX or fit['min_t'] <= 0 or not (-50 <= P[0] <= w + 50 and -50 <= P[1] <= h + 50):
+        raise ScenarioFailure('aim_failed', 'sighting: shot rays do not meet consistently (rms %.1f px, min_t %.1f, '
+                              'P %s): non-uniform view, aim assist or relative aim; run -AimScan'
+                              % (fit['rms_px'], fit['min_t'], [round(v) for v in P]))
+    return SightedAim(P, result)
+
+
 # ------------------------------------------------------------------------------------------ shared pieces
-def keep_grounded(max_air=20):
-    """check(): fail when the spider leaves solid ground for > max_air consecutive frames while walking."""
-    st = {'air': 0}
+def keep_grounded(max_air=20, origin=None):
+    """check(): fail when the spider leaves solid ground for > max_air consecutive frames while walking. The message
+    says where and how (distance from the start, position, velocity, last ground instance and angle), so the
+    failed recording can be compared with the pre-walk ground scan (tools/reference/diagnose_capture.py)."""
+    st = {'air': 0, 'last_ground': None, 'lost_at': None}
 
     def check(ctx):
-        st['air'] = st['air'] + 1 if S.support(ctx.row) != 'ground' else 0
+        b = S.body(ctx.row)
+        if origin is not None and 'x0' not in st and b:
+            st['x0'] = origin[0] if origin else b['pos_px'][0]
+        if S.support(ctx.row) == 'ground':
+            st['air'] = 0
+            v = S.pvars(ctx.row)
+            st['last_ground'] = {'id': v.get('ground'), 'angle': v.get('ground_angle'),
+                                 'pos': [round(c, 1) for c in b['pos_px']] if b else None, 'frame': ctx.frame}
+            return
+        if st['air'] == 0:
+            st['lost_at'] = {'frame': ctx.frame, 'pos': [round(c, 1) for c in b['pos_px']] if b else None,
+                             'vel_pxps': [round(c, 1) for c in b['vel_pxps']] if b else None,
+                             'support': S.support(ctx.row), 'webwalk': S.pvars(ctx.row).get('webwalk')}
+        st['air'] += 1
         if st['air'] > max_air:
-            raise ScenarioFailure('setup_invalid', 'the spider left solid ground while walking '
-                                  '(needs >= 15 spider-lengths of flat ground to the right)')
+            lost = st['lost_at'] or {}
+            dist = (lost.get('pos') or [0])[0] - st['x0'] if 'x0' in st and lost.get('pos') else None
+            ctx.note('left_ground', {'lost': lost, 'last_ground': st['last_ground'], 'distance_from_start_px': dist})
+            raise ScenarioFailure('setup_invalid', 'the spider left solid ground while walking: lost support at frame '
+                                  '%s, %s px from the start, pos %s, vel %s px/s, last ground %s (angle %s); see '
+                                  'diagnose_capture.py' % (lost.get('frame'), None if dist is None else round(dist),
+                                                           lost.get('pos'), lost.get('vel_pxps'),
+                                                           (st['last_ground'] or {}).get('id'),
+                                                           (st['last_ground'] or {}).get('angle')))
     return check
 
 
@@ -244,6 +367,7 @@ def shoot_grapple(ctx, angle):
     yield from ctx.wait_until(lambda r: S.live_shot(r) or S.grapple_attached(r), 10, 'missed_input',
                               'grapple acknowledged by oIO but no web shot appeared')
     shot_seen = S.live_shot(ctx.row)
+    check_shot_direction(ctx, angle, 'grapple shot')
     yield from ctx.wait_until(lambda r: not S.live_shot(r), 60, 'timeout', 'web shot still flying')
     yield from ctx.wait_until(S.grapple_attached, 6, 'setup_invalid',
                               'the web shot ended without attaching: no surface within reach at %.0f deg' % angle)
@@ -304,12 +428,26 @@ def weave_line(ctx, angle):
 
 # ------------------------------------------------------------------------------------------ scenarios
 def m2_walk_flat(ctx):
-    """Procedure M2: hold right 4 s, release 2 s (marker), hold left 4 s, release 2 s."""
+    """Procedure M2: hold right 4 s, release 2 s (marker), hold left 4 s, release 2 s.
+    Needs about 3.5 px/step * 240 + stopping ~ 900 px of flat ground to the RIGHT."""
     yield from ctx.wait(LEAD_IN_FRAMES)
     for action in ('right', 'left'):
         ctx.mark()
-        yield from ctx.hold(action, 240, check=keep_grounded())
-        yield from ctx.wait(120, check=keep_grounded())
+        g = keep_grounded(origin=())
+        yield from ctx.hold(action, 240, check=g)
+        yield from ctx.wait(120, check=g)
+
+
+def m2_walk_short(ctx, hold=90):
+    """M2 in less space: right 1.5 s, stop 1 s, left 1.5 s, stop 1 s, then the mirror (left first). Each hold
+    still gives >= 60 frames at the plateau (enough for test_walk_plateau_speed) and the spider ends where it
+    started. Needs about 3.5 * 90 + stopping ~ 380 px on EACH side."""
+    yield from ctx.wait(LEAD_IN_FRAMES)
+    g = keep_grounded(origin=())
+    for action in ('right', 'left', 'left', 'right'):
+        ctx.mark()
+        yield from ctx.hold(action, hold, check=g)
+        yield from ctx.wait(60, check=g)
 
 
 def w1_attach_hang(ctx):
@@ -477,38 +615,43 @@ def w5_weave_snap(ctx, angle=20, jerks=6):
 
 
 class Scenario:
-    def __init__(self, sid, suite, fn, setup, support='ground', max_frames=6000, needs=()):
+    def __init__(self, sid, suite, fn, setup, support='ground', max_frames=6000, needs=(), space=None, aim=False):
         self.id, self.suite, self.fn, self.setup = sid, suite, fn, setup
         self.support, self.max_frames, self.needs = support, max_frames, tuple(needs)
+        self.space = space or {}          # clear ground needed before inputs: {'right': px, 'left': px}
+        self.aim = aim                    # aims with the mouse: sighting runs first (unless aim-scan verified)
 
 
 SCENARIOS = {s.id: s for s in [
+    Scenario('M2_walk_short', 'M2', m2_walk_short,
+             'Flat solid ground with >= 380 px (about 17 spider-lengths) clear on BOTH sides.',
+             needs=('right', 'left'), max_frames=1200, space={'right': 380, 'left': 380}),
     Scenario('M2_walk_flat', 'M2', m2_walk_flat,
-             'Flat solid ground with >= 15 spider-lengths of clear space to the RIGHT.',
-             needs=('right', 'left'), max_frames=1200),
+             'Flat solid ground with >= 900 px (about 40 spider-lengths) clear to the RIGHT.',
+             needs=('right', 'left'), max_frames=1200, space={'right': 900}),
     Scenario('W1_attach_hang', 'W1', w1_attach_hang,
              'Solid ground under a ceiling or branch about 4-8 spider-lengths straight ABOVE.',
-             needs=('grapple',), max_frames=2400),
+             needs=('grapple',), aim=True, max_frames=2400),
     Scenario('W2_swing', 'W2', w2_swing,
              'Solid ground with a ceiling reachable at 45 deg up-right AND 45 deg up-left (open space below).',
-             needs=('grapple',), max_frames=4800),
+             needs=('grapple',), aim=True, max_frames=4800),
     Scenario('W3_cut_mid_swing', 'W2', w3_cut_mid_swing,
-             'Same spot as W2_swing.', needs=('grapple',), max_frames=6000),
+             'Same spot as W2_swing.', needs=('grapple',), aim=True, max_frames=6000),
     Scenario('W4_retract_probe', 'W4', w4_retract_probe,
              'Solid ground under a ceiling about 6-10 spider-lengths away at ~60 deg up-right (long rope, open space).',
-             needs=('grapple',), max_frames=3600),
+             needs=('grapple',), aim=True, max_frames=3600),
     Scenario('W4_pull', 'W4', w4_pull,
              'Solid ground with a wall/surface about 6 spider-lengths away at ~20 deg up-right.',
-             needs=('grapple', 'retract'), max_frames=2400),
+             needs=('grapple', 'retract'), aim=True, max_frames=2400),
     Scenario('W5_weave_line', 'W3', w5_weave_line,
              'Solid ground with a wall/surface about 4-8 spider-lengths away at ~20 deg up-right, open space to the left.',
-             needs=('weave', 'left'), max_frames=2400),
+             needs=('weave', 'left'), aim=True, max_frames=2400),
     Scenario('W5_weave_snap', 'W3', w5_weave_snap,
-             'Same spot as W5_weave_line.', needs=('weave', 'left', 'right', 'jump'), max_frames=3000),
+             'Same spot as W5_weave_line.', needs=('weave', 'left', 'right', 'jump'), aim=True, max_frames=3000),
 ]}
 
 SUITES = {
-    'M2': ['M2_walk_flat'],                                   # walking acceleration, stopping, max speed
+    'M2': ['M2_walk_short', 'M2_walk_flat'],                  # walking acceleration, stopping, max speed
     'W1': ['W1_attach_hang'],                                 # grapple projectile, attachment, hang, release
     'W2': ['W2_swing', 'W3_cut_mid_swing'],                   # grapple tension, swinging, release
     'W4': ['W4_retract_probe', 'W4_pull'],                    # pull / retract control: experiment, then scenario

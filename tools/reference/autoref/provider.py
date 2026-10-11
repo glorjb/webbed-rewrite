@@ -13,8 +13,11 @@ import ctypes
 import hashlib
 import json
 import os
+import struct
 import sys
 import time
+
+from . import groundscan
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FROZEN_S = 2.0       # no new game frame for this long: game paused by the OS / minimised / closed
@@ -52,7 +55,9 @@ class LiveProvider:
         if not base:
             raise GameLost('could not find the webbed.exe module base')
         with open(os.path.join(inv_dir, 'yyc_vars.json')) as f:
-            self.game = p.Game(p.Mem(self.h), json.load(f), base)
+            var_ids = json.load(f)
+        self.game = p.Game(p.Mem(self.h), var_ids, base)
+        self.id2name = {v: k for k, v in var_ids.items() if v >= 0}
         self.base = base
         self.rec = p.Recorder(self.game)
         self.rec.rediscover()
@@ -126,6 +131,37 @@ class LiveProvider:
                 writer.write_sweep(r)
             elif item[0] == 'sweep_done' and writer is not None:
                 writer.sweep_done()
+
+    def all_vars(self, which):
+        """EVERY numeric instance variable of the player ('player') or the input object ('io'), by name
+        (read-only hashmap walk, same layout as webbed_probe.Game.vars but without a name filter)."""
+        inst = self.rec.player if which == 'player' else self.rec.io
+        m = self.game.m
+        vmap = m.u32(inst + self.p.INST_VARMAP) if inst else None
+        hdr = m.raw(vmap, 0x14) if vmap else None
+        if not hdr:
+            return {}
+        size, _, _, _, elems = struct.unpack('<5I', hdr)
+        if not elems or not (0 < size <= 1 << 16):
+            return {}
+        blob = m.raw(elems, size * 12)
+        out = {}
+        for vptr, key, hsh in struct.iter_unpack('<IiI', blob or b''):
+            if hsh and vptr:
+                v = m.rvalue(vptr)
+                if isinstance(v, (int, float)):
+                    out[self.id2name.get(key, 'var%d' % key)] = v
+        return out
+
+    def ground_profile(self, row):
+        """groundscan estimate around the player in `row` (read-only; one instance walk)."""
+        b = (row.get('player') or {}).get('body')
+        if not b:
+            return {'confidence': 'unavailable', 'reason': 'no player body'}
+        if not hasattr(self, '_inv'):
+            self._inv = groundscan.load_inventory()
+        solids = groundscan.live_solids(self.game, self.p, self.obj_names, *self._inv)
+        return groundscan.ground_profile(solids, b['pos_px'], ((row['player'].get('vars') or {}).get('ground')))
 
     def close(self):
         try:

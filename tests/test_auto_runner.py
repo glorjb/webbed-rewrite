@@ -6,8 +6,10 @@ mock output is ever written to the real capture root.
 """
 import hashlib
 import json
+import math
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,7 +25,12 @@ from autoref.capture import SessionWriter                       # noqa: E402
 from autoref.driver import AbortRun, Watchdog                   # noqa: E402
 from autoref.mock import MockGame, MockInputDriver              # noqa: E402
 from autoref.provider import GameLost                           # noqa: E402
+from autoref import aim as A                                    # noqa: E402
+from autoref import groundscan as G                             # noqa: E402
 from autoref import runner as RN                                # noqa: E402
+from autoref.inputhook import TakeoverMonitor                   # noqa: E402
+
+DIAG = os.path.join(HERE, '..', 'tools', 'reference', 'diagnose_capture.py')
 from autoref.runner import Config, ConsoleUI, Runner            # noqa: E402
 
 
@@ -109,16 +116,6 @@ class MockRun(unittest.TestCase):
         self.assertEqual(saved['failure']['kind'], kind)
         self.assertEqual(saved['preserved_at'], res['preserved_at'])
 
-    def test_missed_input_is_retried_and_every_attempt_preserved(self):
-        g, d, r = self.make(retries=1, drop_keys=('LMB',))
-        res = self.run_ids(r, ['W1_attach_hang'])
-        self.assertEqual(len(res), 2)
-        for x in res:
-            self.assertPreservedFailure(r, x, 'missed_input')
-        self.assertEqual(len(self.sessions(r.cfg.failed_root)), 2)
-        self.assertEqual(self.sessions(self.root), [])           # nothing unusable left where tests read
-        self.assertEqual(d.held, set())
-
     def test_torn_frames_make_capture_invalid(self):
         g, d, r = self.make(retries=0, torn_every=5)              # 20 % torn > 5 % gate
         res = self.run_ids(r, ['M2_walk_flat'])[0]
@@ -156,11 +153,6 @@ class MockRun(unittest.TestCase):
         self.assertEqual(len(res), 1)
         self.assertPreservedFailure(r, res[0], 'setup_invalid')
 
-    def test_walking_off_a_ledge_is_setup_invalid(self):
-        g, d, r = self.make(retries=0, ground_x=(0, 600))
-        res = self.run_ids(r, ['M2_walk_flat'])[0]
-        self.assertPreservedFailure(r, res, 'setup_invalid')
-
     def test_unresolved_binding_is_skipped_and_records_nothing(self):
         g, d, r = self.make(keys={'right': 'D', 'left': 'A', 'grapple': 'LMB'})
         res = self.run_ids(r, ['W4_pull'])
@@ -197,35 +189,172 @@ class MockRun(unittest.TestCase):
         self.assertIn(('player', 'attached'), names)
         self.assertIn(('io', 'grapple'), names)
 
-    def test_aim_falls_back_to_io_aim_point(self):
-        g, d, r = self.make()
-        real_row = g._row
+    def test_missed_input_is_retried_and_every_attempt_preserved(self):
+        g, d, r = self.make(retries=1, drop_keys=('D',))
+        res = self.run_ids(r, ['M2_walk_short'])
+        self.assertEqual(len(res), 2)
+        for x in res:
+            self.assertPreservedFailure(r, x, 'missed_input')
+        self.assertEqual(len(self.sessions(r.cfg.failed_root)), 2)
+        self.assertEqual(self.sessions(self.root), [])           # nothing unusable left where tests read
+        self.assertEqual(d.held, set())
 
-        def row_without_crosshair(*a):
-            row, focus = real_row(*a)
-            if row['player']:
-                row['player']['vars']['crosshair_tx'] = row['player']['vars']['crosshair_ty'] = 0.0   # frozen
-            return row, focus
-        g._row = row_without_crosshair
+    def test_missed_grapple_fails_in_sighting_before_recording(self):
+        g, d, r = self.make(retries=0, drop_keys=('LMB',))
+        res = self.run_ids(r, ['W1_attach_hang'])[0]
+        self.assertEqual(res['failure']['kind'], 'missed_input')
+        self.assertNotIn('session', res)                           # sighting happens before any recording
+        self.assertEqual(self.sessions(self.root) + self.sessions(r.cfg.failed_root), [])
+
+    # ------------------------------------------------------------------ live failure 1: aim feedback
+    def test_live_aim_failure_is_solved_by_sighting(self):
+        """Live 2026-10-11: crosshair_tx/ty static and oIO has no aimx/aimy -> feedback aim failed. Sighting
+        measures the aim origin from the shots themselves; the real shot is direction-checked."""
+        g, d, r = self.make(crosshair_static=True, io_absent=('aimx', 'aimy'))
         res = self.run_ids(r, ['W1_attach_hang'])[0]
         self.assertEqual(res['status'], 'pass', res.get('failure'))
-        self.assertEqual(res['observations']['aim'][0]['source'], 'io.aimx.aimy')
+        self.assertAlmostEqual(res['sighting']['fit']['P'][0], 640.0, places=6)
+        self.assertAlmostEqual(res['sighting']['fit']['P'][1], 360.0, places=6)
+        self.assertLess(abs(res['observations']['aim_check'][0]['error_deg']), 1.0)
 
-    def test_aim_fails_cleanly_without_feedback(self):
-        g, d, r = self.make(retries=0)
-        real_row = g._row
+    def test_sighting_finds_an_off_centre_spider(self):
+        g, d, r = self.make(camera_offset=(-180.0, 90.0), crosshair_static=True)
+        res = self.run_ids(r, ['W2_swing'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        P = res['sighting']['fit']['P']
+        self.assertAlmostEqual(P[0], 460.0, delta=1.0)
+        self.assertAlmostEqual(P[1], 450.0, delta=1.0)
+        for c in res['observations']['aim_check']:
+            self.assertLess(abs(c['error_deg']), 1.0)
 
-        def row_without_aim(*a):
-            row, focus = real_row(*a)
-            if row['player']:
-                row['player']['vars'].pop('crosshair_tx')
-            if row['io']:
-                row['io'].pop('aimx', None)
-            return row, focus
-        g._row = row_without_aim
+    def test_sighting_works_whether_or_not_gh_gv_survive_attachment(self):
+        g, d, r = self.make(gh_reset_on_attach=False)
+        self.assertEqual(self.run_ids(r, ['W1_attach_hang'])[0]['status'], 'pass')
+
+    def test_relative_only_aim_fails_cleanly_before_recording(self):
+        g, d, r = self.make(retries=0, mouse_relative=True)
         res = self.run_ids(r, ['W1_attach_hang'])[0]
-        self.assertPreservedFailure(r, res, 'aim_failed')
+        self.assertEqual(res['failure']['kind'], 'aim_failed')
+        self.assertIn('does not aim at the absolute cursor', res['failure']['msg'])
+        self.assertEqual(len(res['sighting']['shots']), 3)        # the measurements are kept in the result
+        self.assertEqual(self.sessions(self.root) + self.sessions(r.cfg.failed_root), [])
         self.assertEqual(d.held, set())
+
+    def test_wrong_aim_is_caught_by_the_shot_direction_check(self):
+        g, d, r = self.make(retries=0)
+        r._sight = lambda res: SC.SightedAim((640.0, 520.0), {'fit': {'rms_px': 0.0}})   # deliberately wrong
+        res = self.run_ids(r, ['W2_swing'])[0]
+        self.assertPreservedFailure(r, res, 'aim_failed')
+        self.assertIn('intended 45 deg', res['failure']['msg'])
+
+    def test_verified_aimscan_feedback_profile_replaces_sighting(self):
+        g, d, r = self.make()
+        r.aim_profile = {'feedback_pair': ['io.aimx', 'io.aimy']}
+        res = self.run_ids(r, ['W1_attach_hang'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        self.assertNotIn('sighting', res)
+        self.assertEqual(res['observations']['aim'][0]['source'], 'io.aimx.aimy')
+        self.assertLess(abs(res['observations']['aim_check'][0]['error_deg']), 2.5)
+
+    # ------------------------------------------------------------------ live failure 2: false takeover
+    def test_game_recentring_the_cursor_is_not_a_takeover(self):
+        """Live 2026-10-11: 'mouse moved by user' with nobody touching it. The game moving the cursor is not
+        an input event; only physical / foreign input counts (inputhook.TakeoverMonitor)."""
+        g, d, r = self.make(cursor_recenters=True)
+        res = self.run_ids(r, ['M2_walk_short', 'W1_attach_hang'])
+        self.assertEqual([x['status'] for x in res], ['pass', 'pass'], [x.get('failure') for x in res])
+
+    def test_physical_mouse_movement_during_a_scenario_aborts(self):
+        g, d, r = self.make()
+        d.physical_at = [(g.index + 120, 'move')]
+        with self.assertRaises(AbortRun) as cm:
+            self.run_ids(r, ['M2_walk_short'])
+        self.assertIn('physical mouse movement', str(cm.exception))
+        self.assertEqual(d.held, set())
+        self.assertPreservedFailure(r, r.results[0], 'aborted')
+
+    def test_physical_key_press_aborts_and_f12_is_an_emergency(self):
+        g, d, r = self.make()
+        d.physical_at = [(g.index + 100, 'key')]
+        with self.assertRaises(AbortRun) as cm:
+            self.run_ids(r, ['M2_walk_short'])
+        self.assertIn('physical key press', str(cm.exception))
+        g2, d2, r2 = self.make()
+        d2.physical_at = [(g2.index + 100, 'f12')]
+        with self.assertRaises(AbortRun) as cm:
+            self.run_ids(r2, ['M2_walk_short'])
+        self.assertIn('EMERGENCY', str(cm.exception))
+
+    def test_user_input_during_the_setup_prompt_is_not_a_takeover(self):
+        g, d, r = self.make()
+
+        def ask(msg):                    # the user walks the spider into place while the runner waits
+            d.monitor.on_mouse(0x0200, 10, 10, False, False)
+            d.monitor.on_mouse(0x0200, 300, 200, False, False)
+            d.monitor.on_key(0x44, True, False, False)
+            return ''
+        r.ui.ask = ask
+        res = self.run_ids(r, ['M2_walk_short'])
+        self.assertEqual(res[0]['status'], 'pass', res[0].get('failure'))
+
+    # ------------------------------------------------------------------ live failure 3: M2 left the ground
+    def test_insufficient_ground_is_detected_before_any_input(self):
+        """Live 2026-10-11: M2 walked ~840 px right and left the ground. The scan now says so first."""
+        g, d, r = self.make(ground_x=(0, 600))
+        res = self.run_ids(r, ['M2_walk_short', 'M2_walk_flat'])
+        self.assertEqual([x['status'] for x in res], ['skipped', 'skipped'])
+        self.assertEqual({x['failure']['kind'] for x in res}, {'insufficient_space'})
+        self.assertFalse([e for e in d.events if e[1] in ('D', 'A')])   # no walking key was ever pressed
+        self.assertEqual(self.sessions(self.root) + self.sessions(r.cfg.failed_root), [])
+
+    def test_short_walk_runs_where_the_long_one_does_not_fit(self):
+        g, d, r = self.make(ground_x=(0, 1000))
+        res = self.run_ids(r, ['M2_walk_short', 'M2_walk_flat'])
+        self.assertEqual([x['status'] for x in res], ['pass', 'skipped'], [x.get('failure') for x in res])
+        s = cap.Session(os.path.join(self.root, res[0]['session']))
+        walking = [f for f in s.frames if cap.support(f) == 'ground' and abs(f['io'].get('hm') or 0) == 1]
+        self.assertGreaterEqual(len(walking), 60)                 # enough for test_walk_plateau_speed
+
+    def test_leaving_the_ground_is_explained_when_the_scan_is_unavailable(self):
+        g, d, r = self.make(retries=0, ground_x=(0, 600), scan_unavailable=True)
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertPreservedFailure(r, res, 'setup_invalid')
+        lg = res['observations']['left_ground'][0]
+        self.assertAlmostEqual(lg['distance_from_start_px'], 200, delta=15)
+        self.assertIn('px from the start', res['failure']['msg'])
+        out = subprocess.run([sys.executable, DIAG, res['preserved_at']], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn('support lost at frame', out.stdout)
+        self.assertIn('setup_invalid', out.stdout)
+
+    # ------------------------------------------------------------------ diagnostics
+    def test_aim_scan_finds_mouse_following_variables(self):
+        g, d, r = self.make()
+        an = r.aim_scan(os.path.join(self.tmp, 'scan'))
+        vars_ = {f['var'] for f in an['followers']}
+        self.assertTrue({'player.crosshair_tx', 'player.crosshair_ty', 'io.aimx', 'io.aimy'} <= vars_, vars_)
+        self.assertEqual(an['cursor']['mode'], 'positional')
+        self.assertNotIn('player.mock_unrelated_counter', vars_)
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, 'scan', 'aimscan.jsonl')))
+        self.assertTrue(os.path.exists(r.cfg.aim_profile_file))
+        self.assertEqual(d.held, set())
+        self.assertFalse([e for e in d.events if e[0] == 'down'])  # nothing was clicked or pressed
+
+    def test_aim_scan_reports_live_situation(self):
+        g, d, r = self.make(crosshair_static=True, io_absent=('aimx', 'aimy'), cursor_recenters=True)
+        an = r.aim_scan(os.path.join(self.tmp, 'scan'))
+        self.assertEqual(an['followers'], [])
+        self.assertIsNone(an['feedback_pair'])
+        self.assertIn('sighting', an['recommendation'])
+        self.assertEqual(an['cursor']['mode'], 'recentred_or_locked')
+        self.assertFalse(os.path.exists(r.cfg.aim_profile_file))
+
+    def test_aim_sight_diagnostic(self):
+        g, d, r = self.make(camera_offset=(50.0, -40.0))
+        out = r.aim_sight()
+        self.assertTrue(out['ok'], out)
+        self.assertAlmostEqual(out['P'][0], 690.0, delta=1.0)
+        self.assertAlmostEqual(out['P'][1], 320.0, delta=1.0)
 
     # ------------------------------------------------------------------ safety
     def test_focus_restore_failure_after_prompt_aborts_safely(self):
@@ -410,6 +539,94 @@ class StateRules(unittest.TestCase):
         self.assertTrue(B.signal({'jmp': 1}, 'jump'))
         self.assertFalse(B.signal({}, 'grapple'))
         self.assertFalse(B.signal({'grapple': '<kind6>'}, 'grapple'))
+
+
+class Takeover(unittest.TestCase):
+    def test_monitor_tells_runner_input_from_user_input(self):
+        m = TakeoverMonitor()
+        m.arm()
+        m.on_mouse(0x0200, 0, 0, True, True)              # ours (tagged SendInput)
+        m.on_mouse(0x0200, 500, 500, True, True)
+        m.on_mouse(0x0201, 500, 500, True, True)
+        m.on_key(0x44, True, True, True)
+        m.on_mouse(0x0200, 640, 360, True, False)         # injected by someone else (cursor tools / drivers)
+        m.on_mouse(0x0200, 642, 361, False, False)        # physical jitter, 2 px
+        self.assertIsNone(m.takeover())
+        m.on_mouse(0x0200, 649, 361, False, False)        # physical, 9 px total
+        self.assertIn('physical mouse movement', m.takeover())
+        self.assertEqual(m.counts['foreign_injected_moves'], 1)
+
+    def test_monitor_keys_buttons_and_arming(self):
+        m = TakeoverMonitor()
+        m.on_key(0x41, True, False, False)                # disarmed: ignored
+        self.assertIsNone(m.takeover())
+        m.arm()
+        m.on_key(0x41, False, False, False)               # key up only: ignored
+        self.assertIsNone(m.takeover())
+        m.on_mouse(0x0204, 0, 0, True, False)             # another program's right click
+        self.assertIn('injected', m.takeover())
+        m.arm()
+        self.assertIsNone(m.takeover())
+        m.on_key(0x7B, True, False, False)                # F12
+        self.assertTrue(m.emergency)
+        self.assertIsNone(m.takeover())
+        m.disarm()
+        self.assertIsNone(m.takeover())
+
+
+class AimGeometry(unittest.TestCase):
+    def test_ray_intersection(self):
+        P = (420.0, 300.0)
+        rays = []
+        for a in (240, 300, 270, 30):
+            m = (P[0] + 100 * math.cos(math.radians(a)), P[1] - 100 * math.sin(math.radians(a)))
+            rays.append((m[0], m[1], math.cos(math.radians(a)), -math.sin(math.radians(a))))
+        fit = A.ray_intersection(rays)
+        self.assertAlmostEqual(fit['P'][0], 420.0, places=6)
+        self.assertAlmostEqual(fit['P'][1], 300.0, places=6)
+        self.assertLess(fit['rms_px'], 1e-6)
+        self.assertGreater(fit['min_t'], 0)
+
+    def test_parallel_rays_are_rejected(self):
+        fit = A.ray_intersection([(100, 100, 1, -1), (300, 120, 1, -1), (500, 50, 1, -1)])
+        self.assertIsNone(fit['P'])
+
+    def test_shot_direction_fallback(self):
+        self.assertAlmostEqual(A.shot_direction({'gh': 0.0, 'gv': -35.0})[1], 90.0)
+        d = A.shot_direction({'gh': 0, 'gv': 0, 'sx': 10, 'sy': 10, 'gx': 20, 'gy': 20})
+        self.assertAlmostEqual(d[1], 315.0)
+        self.assertIsNone(A.shot_direction({'gh': 0, 'gv': 0}))
+
+
+class GroundScan(unittest.TestCase):
+    SPR = {'w': 32, 'h': 32, 'ox': 16, 'oy': 16}
+
+    def test_instance_box(self):
+        self.assertEqual(G.instance_box(100, 200, 4, 1, 0, self.SPR), (36.0, 184.0, 164.0, 216.0))
+        l, t, r, b = G.instance_box(0, 0, 2, 1, 90, self.SPR)        # rotated: tall box
+        self.assertAlmostEqual(r - l, 32, places=6)
+        self.assertAlmostEqual(b - t, 64, places=6)
+
+    def test_edge_wall_and_unavailable(self):
+        floor = {'id': 1, 'obj': 'oGround', 'angle': 0, 'box': (0, 100, 600, 132)}
+        wall = {'id': 2, 'obj': 'oGround', 'angle': 0, 'box': (500, 0, 532, 100)}
+        p = G.ground_profile([floor], (200, 89), 1)
+        self.assertEqual(p['confidence'], 'estimate')
+        self.assertEqual(p['right']['end'], 'edge')
+        self.assertAlmostEqual(p['right']['clear_px'], 400, delta=G.STEP + 1)
+        self.assertAlmostEqual(p['left']['clear_px'], 200, delta=G.STEP + 1)
+        p = G.ground_profile([floor, wall], (200, 89), 1)
+        self.assertEqual(p['right']['end'], 'wall')
+        self.assertAlmostEqual(p['right']['clear_px'], 500 - 11 - 200, delta=G.STEP + 1)
+        self.assertEqual(G.ground_profile([floor], (200, 89), 99)['confidence'], 'unavailable')
+        self.assertEqual(G.ground_profile([floor], (200, 40), 1)['confidence'], 'unavailable')
+
+    def test_solid_objects_from_inventory(self):
+        objs, sprites = G.load_inventory()
+        names = G.solid_object_names(objs)
+        self.assertIn('oGround', names)
+        self.assertIn('oSolidPlatform', names)
+        self.assertNotIn('oPlayer', names)
 
 
 if __name__ == '__main__':

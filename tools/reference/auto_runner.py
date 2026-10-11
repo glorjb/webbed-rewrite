@@ -7,6 +7,8 @@
     python tools/reference/auto_runner.py --calibrate               # find the key for each action via oIO
     python tools/reference/auto_runner.py --calibrate retract       # only those actions; others are kept
     python tools/reference/auto_runner.py --list                    # suites, scenarios and the spot each needs
+    python tools/reference/auto_runner.py --aim-scan                # cursor sweep, NO shots: what follows the mouse?
+    python tools/reference/auto_runner.py --aim-sight               # 3 grapple taps into the floor: aim origin
     python tools/reference/auto_runner.py --mock --all              # runner self-test against a FAKE game
 
 Launcher: powershell -ExecutionPolicy Bypass -File tools\\reference\\auto_record.ps1 -All
@@ -42,13 +44,21 @@ def parse(argv=None):
                          'keys of other actions are kept and the previous file is backed up'
                          % ', '.join(RN.Runner.CAL_ORDER))
     ap.add_argument('--list', action='store_true', help='list suites and scenarios, then exit')
+    ap.add_argument('--aim-scan', action='store_true',
+                    help='diagnostic, fires nothing: sweep the cursor and record every oIO / oPlayer variable and the '
+                         'actual cursor position; reports which variables follow the mouse and whether the game moves '
+                         'the cursor')
+    ap.add_argument('--aim-sight', action='store_true',
+                    help='diagnostic: 3 short grapple taps into the floor to measure where the aim origin is on screen')
     ap.add_argument('--no-calibrate', action='store_true', help='never calibrate automatically')
     ap.add_argument('--capture-root', default=None)
     ap.add_argument('--retries', type=int, default=1, help='extra attempts for transient failures (default 1)')
     ap.add_argument('--no-prompt', action='store_true', help='do not pause for manual positioning between suites')
     ap.add_argument('--no-tests', action='store_true', help='skip the regression test run')
     ap.add_argument('--no-mouse-failsafe', action='store_true',
-                    help='do not abort when the cursor moves unexpectedly (use if the game warps the cursor)')
+                    help='disable user-takeover detection (physical mouse/keyboard input while the runner owns '
+                         'the game). F12 / Pause, focus-loss and the watchdog stay active. Not needed for cursor '
+                         'warping by the game, which is not counted as a takeover')
     ap.add_argument('--mock', action='store_true', help='use the FAKE game (runner self-test, no Windows needed)')
     ap.add_argument('--mock-fault', action='append', default=[],
                     help='mock fault injection, e.g. drop_keys=LMB, torn_every=5, io_latency=3, freeze_at=200')
@@ -56,7 +66,9 @@ def parse(argv=None):
 
 
 GAME_FAULTS = {'drop_keys', 'release_mode', 'io_latency', 'torn_every', 'skip_every', 'no_player_frames',
-               'freeze_at', 'respawn_at', 'io_absent', 'weave_reels_in', 'jitter_pxps'}
+               'freeze_at', 'respawn_at', 'io_absent', 'weave_reels_in', 'jitter_pxps', 'cursor_recenters',
+               'crosshair_static', 'mouse_relative', 'gh_reset_on_attach', 'scan_unavailable', 'floor_attaches',
+               'camera_offset', 'ground_x'}
 DRIVER_FAULTS = {'emergency_at', 'focus_lost_at'}
 
 
@@ -69,6 +81,8 @@ def mock_kwargs(faults):
             game[k] = tuple(v.split(','))
         elif k == 'jitter_pxps':
             game[k] = float(v)
+        elif k in ('camera_offset', 'ground_x'):
+            game[k] = tuple(float(x) for x in v.split(','))
         elif k == 'release_mode':
             game[k] = v
         elif k in GAME_FAULTS:
@@ -98,7 +112,8 @@ def main(argv=None):
     only = set(a.scenario) or None
     if only:
         suites = suites or [s for s in SUITE_ORDER if any(i in only for i in SUITES[s])]
-    if not (suites or a.check or calibrating):
+    diagnostic = a.aim_scan or a.aim_sight
+    if not (suites or a.check or calibrating or diagnostic):
         print('nothing to do: pass --all, --suite, --scenario, --check or --calibrate')
         return 2
     if a.mock:
@@ -120,7 +135,7 @@ def main(argv=None):
     print('Desktop Playground automated reference run %s (%s)' % (run_info['stamp'], cfg.mode))
     print('captures: %s   failed recordings: %s' % (cfg.capture_root, cfg.failed_root))
     if not a.mock:
-        print('EMERGENCY STOP: F12 or Pause/Break. Switching window or moving the mouse also stops the run.')
+        print('EMERGENCY STOP: F12 or Pause/Break. Switching window, or touching the mouse/keyboard during a scenario, also stops the run.')
 
     provider = driver = watchdog = runner = None
     results = []
@@ -174,6 +189,25 @@ def main(argv=None):
                           % missing)
                 print('Calibration only confirms that the game receives the keys; it validates no physics.')
             run_info['bindings'] = bnd.to_json()
+            if a.aim_scan:
+                out = os.path.join(cfg.runs_root, run_info['stamp'], 'aimscan')
+                print('Aim scan: moving the cursor over the game window (no clicks, no keys) ...')
+                an = runner.aim_scan(out)
+                run_info['aim_scan'] = {k: an.get(k) for k in ('cursor', 'followers', 'feedback_pair', 'recommendation',
+                                                               'variables_that_changed',
+                                                               'variables_that_changed_with_relative_motion',
+                                                               'cursor_state_at_end', 'hooks',
+                                                               'takeover_monitor_counts')}
+                print('cursor: %s' % an.get('cursor'))
+                print('variables following the cursor: %s' % ([(f['var'], f['r2']) for f in an['followers'][:6]] or 'none'))
+                print('changed with relative motion: %s' % (an['variables_that_changed_with_relative_motion'][:12] or 'none'))
+                print(an['recommendation'])
+                print('details: %s' % out)
+            if a.aim_sight:
+                print('Aim sighting: 3 short grapple taps into the floor ...')
+                r = runner.aim_sight()
+                run_info['aim_sight'] = r
+                print('sighting %s: %s' % ('OK' if r['ok'] else 'FAILED', r['P'] if r['ok'] else r['failure']))
             if suites:
                 runner.run_suites(suites, only)
     except (GameLost, RuntimeError) as e:

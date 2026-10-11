@@ -6,13 +6,18 @@ keyboard/mouse. It never opens the game process for writing, injects code or loa
 Safety (all paths release every held key/button):
   * inputs are sent only while the game window is the foreground window; focus loss aborts the run;
   * emergency stop: F12 or Pause/Break (polled every loop iteration; the runner never sends these keys);
-  * user takeover: the physical mouse moving away from where the runner put it aborts (configurable);
+  * user takeover: any PHYSICAL mouse/keyboard input (or another program's key/button) while the runner owns
+    the game aborts. Runner input is told apart by a tag on every SendInput event, seen through low-level
+    hooks (inputhook.py); the game moving the cursor itself is never a takeover. Fallback when hooks cannot
+    be installed: the old cursor-position comparison, with a warning;
   * watchdog thread: if the main loop stops polling for WATCHDOG_S while inputs are held, it releases them;
   * Ctrl+C in the console, any exception, and interpreter exit (atexit) release everything.
 """
 import atexit
 import threading
 import time
+
+from .inputhook import RUNNER_TAG, LowLevelHooks, TakeoverMonitor
 
 WATCHDOG_S = 0.75
 MOUSE_TAKEOVER_PX = 48
@@ -54,8 +59,26 @@ class InputDriver:
     def emergency_pressed(self):
         return False
 
-    def user_moved_mouse(self):
-        return False
+    def takeover(self):
+        """Reason string when the user took over since arm(), else None."""
+        return None
+
+    def arm(self):
+        """Start takeover detection (the runner owns the game from now on)."""
+
+    def disarm(self):
+        """Stop takeover detection (console prompt, manual setup)."""
+
+    def cursor_client(self):
+        """Actual cursor position in game-window client coordinates (diagnostics), or None."""
+        return None
+
+    def cursor_state(self):
+        """Diagnostics: cursor visibility / clipping as Windows reports them."""
+        return {}
+
+    def move_mouse_relative(self, dx, dy):
+        raise NotImplementedError
 
     def focus_game(self, timeout_s=15.0):
         return True
@@ -112,8 +135,10 @@ class SafetyGuard:
             self.abort('EMERGENCY STOP (F12 / Pause pressed)')
         if self.require_focus and not self.driver.foreground_ok():
             self.abort('the game window lost focus (no inputs are sent to other windows)')
-        if self.mouse_failsafe and self.driver.user_moved_mouse():
-            self.abort('the mouse was moved by the user (takeover); disable with -NoMouseFailsafe if the game moves the cursor')
+        if self.mouse_failsafe:
+            r = self.driver.takeover()
+            if r:
+                self.abort('user takeover: %s' % r)
 
     def abort(self, reason):
         self.driver.release_all()
@@ -174,6 +199,14 @@ class WinInputDriver(InputDriver):
         if not self.hwnd:
             raise RuntimeError('no visible window belongs to webbed.exe (pid %d)' % pid)
         self._last_move_t = 0.0
+        self.monitor = TakeoverMonitor()
+        self.hooks = LowLevelHooks(self.monitor)
+        self.hook_ok = self.hooks.start()
+        if not self.hook_ok:
+            print('WARNING: low-level input hooks unavailable (%s). Takeover detection falls back to comparing the '
+                  'cursor position, which false-triggers if the game moves the cursor. F12 / Pause and focus-loss '
+                  'protection are unaffected.' % self.hooks.error)
+        atexit.register(self.hooks.stop)
 
     # ---- window
     def _find_window(self, pid):
@@ -252,16 +285,46 @@ class WinInputDriver(InputDriver):
 
     # ---- safety
     def emergency_pressed(self):
-        return any(self.u32.GetAsyncKeyState(vk) & 0x8000 for vk in self.EMERGENCY_VK)
+        return self.monitor.emergency or any(self.u32.GetAsyncKeyState(vk) & 0x8000 for vk in self.EMERGENCY_VK)
 
-    def user_moved_mouse(self):
-        if self.mouse is None or time.monotonic() - self._last_move_t < 0.1:
-            return False
+    def arm(self):
+        self.mouse = None
+        self.monitor.arm()
+
+    def disarm(self):
+        self.monitor.disarm()
+
+    def takeover(self):
+        if self.hook_ok:
+            return self.monitor.takeover()
+        # fallback (no hooks): cursor far from where the runner put it
+        if not self.monitor.armed or self.mouse is None or time.monotonic() - self._last_move_t < 0.1:
+            return None
+        c = self.cursor_client()
+        if c and abs(c[0] - self.mouse[0]) + abs(c[1] - self.mouse[1]) > MOUSE_TAKEOVER_PX:
+            return 'cursor is %s, runner put it at %s (position fallback; hooks unavailable)' % (c, self.mouse)
+        return None
+
+    def cursor_client(self):
         ct, wt = self.ct, self.wt
         pt = wt.POINT()
         self.u32.GetCursorPos(ct.byref(pt))
         (ox, oy), _ = self._client_origin_size()
-        return abs(pt.x - ox - self.mouse[0]) + abs(pt.y - oy - self.mouse[1]) > MOUSE_TAKEOVER_PX
+        return (pt.x - ox, pt.y - oy)
+
+    def cursor_state(self):
+        ct, wt = self.ct, self.wt
+
+        class CURSORINFO(ct.Structure):
+            _fields_ = [('cbSize', wt.DWORD), ('flags', wt.DWORD), ('hCursor', wt.HANDLE), ('pt', wt.POINT)]
+        ci = CURSORINFO()
+        ci.cbSize = ct.sizeof(ci)
+        self.u32.GetCursorInfo(ct.byref(ci))
+        clip = wt.RECT()
+        self.u32.GetClipCursor(ct.byref(clip))
+        (ox, oy), (w, h) = self._client_origin_size()
+        return {'visible': bool(ci.flags & 1), 'clip_screen': [clip.left, clip.top, clip.right, clip.bottom],
+                'client_origin_screen': [ox, oy], 'client_size': [w, h]}
 
     # ---- input
     def _send(self, inp):
@@ -287,12 +350,12 @@ class WinInputDriver(InputDriver):
         if key.upper() in self.EXTENDED:
             flags |= 0x0001                                    # KEYEVENTF_EXTENDEDKEY
         inp = self.INPUT(type=1)
-        inp.u.ki = type(inp.u.ki)(wVk=vk, wScan=scan, dwFlags=flags, time=0, dwExtraInfo=0)
+        inp.u.ki = type(inp.u.ki)(wVk=vk, wScan=scan, dwFlags=flags, time=0, dwExtraInfo=RUNNER_TAG)
         self._send(inp)
 
     def _mouse_event(self, flags, dx=0, dy=0):
         inp = self.INPUT(type=0)
-        inp.u.mi = type(inp.u.mi)(dx=dx, dy=dy, mouseData=0, dwFlags=flags, time=0, dwExtraInfo=0)
+        inp.u.mi = type(inp.u.mi)(dx=dx, dy=dy, mouseData=0, dwFlags=flags, time=0, dwExtraInfo=RUNNER_TAG)
         self._send(inp)
 
     def press(self, key):
@@ -325,4 +388,11 @@ class WinInputDriver(InputDriver):
         ny = int(round((oy + y - vy) * 65535 / max(vh - 1, 1)))
         self._mouse_event(0x0001 | 0x8000 | 0x4000, nx, ny)     # MOVE | ABSOLUTE | VIRTUALDESK
         self.mouse = (x, y)
+        self._last_move_t = time.monotonic()
+
+    def move_mouse_relative(self, dx, dy):
+        """Relative mouse motion (mickeys; subject to pointer acceleration) for games that read deltas."""
+        if not self.foreground_ok():
+            raise AbortRun('refusing to move the mouse: the game window is not in the foreground')
+        self._mouse_event(0x0001, int(dx), int(dy))
         self._last_move_t = time.monotonic()

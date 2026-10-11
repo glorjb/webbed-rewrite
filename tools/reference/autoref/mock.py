@@ -13,6 +13,7 @@ import os
 import sys
 
 from .driver import InputDriver
+from .inputhook import EMERGENCY_VKS, WM_MOUSEMOVE, TakeoverMonitor
 from .provider import GameLost
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'sim'))
@@ -34,7 +35,46 @@ class MockInputDriver(InputDriver):
         self.focus_lost_at = None
         self.emergency_at = None
         self.refocus_ok = True              # focus_game() succeeds (False: Windows refused and nobody clicked)
-        self.cursor = (client[0] / 2.0, client[1] / 2.0)   # where the fake game sees the pointer
+        self.monitor = TakeoverMonitor()    # same logic as the live low-level hooks
+        self.physical_at = []               # [(frame index, 'move' | 'key' | 'button' | 'f12')]: simulated user input
+        self.cursor = (client[0] / 2.0, client[1] / 2.0)   # where Windows reports the pointer
+        self.aim_cursor = self.cursor                        # where the fake game last sampled it
+
+    def tick(self, index):
+        """Feed scheduled simulated input to the takeover monitor (what the live hooks would report)."""
+        for at, kind in [e for e in self.physical_at if e[0] == index]:
+            if kind == 'move':
+                x, y = self.cursor
+                self.monitor.on_mouse(WM_MOUSEMOVE, x, y, False, False)
+                self.monitor.on_mouse(WM_MOUSEMOVE, x + 20, y, False, False)
+            elif kind == 'button':
+                self.monitor.on_mouse(0x0201, 0, 0, False, False)
+            elif kind == 'key':
+                self.monitor.on_key(0x41, True, False, False)
+            elif kind == 'f12':
+                self.monitor.on_key(EMERGENCY_VKS[0], True, False, False)
+
+    def arm(self):
+        self.mouse = None
+        self.monitor.arm()
+
+    def disarm(self):
+        self.monitor.disarm()
+
+    def takeover(self):
+        return self.monitor.takeover()
+
+    def cursor_client(self):
+        return self.cursor
+
+    def cursor_state(self):
+        return {'visible': not self.game.cursor_recenters, 'clip_screen': [0, 0, 0, 0], 'client_size': list(self.client)}
+
+    def move_mouse_relative(self, dx, dy):
+        if self.game.mouse_relative:
+            self.game.virtual_aim = (self.game.virtual_aim[0] + dx, self.game.virtual_aim[1] + dy)
+        else:
+            self.move_mouse(self.cursor[0] + dx, self.cursor[1] + dy)
 
     def press(self, key):
         self.held.add(key.upper())
@@ -45,7 +85,8 @@ class MockInputDriver(InputDriver):
         self.events.append(('up', key.upper(), self.game.index))
 
     def move_mouse(self, x, y):
-        self.cursor = self.mouse = (max(2, min(self.client[0] - 3, x)), max(2, min(self.client[1] - 3, y)))
+        self.cursor = self.mouse = self.aim_cursor = (max(2, min(self.client[0] - 3, x)),
+                                                      max(2, min(self.client[1] - 3, y)))
 
     def client_size(self):
         return self.client
@@ -54,7 +95,7 @@ class MockInputDriver(InputDriver):
         return self.focus_lost_at is None or self.game.index < self.focus_lost_at
 
     def emergency_pressed(self):
-        return self.emergency_at is not None and self.game.index >= self.emergency_at
+        return self.monitor.emergency or (self.emergency_at is not None and self.game.index >= self.emergency_at)
 
     def focus_game(self, timeout_s=15.0):
         if self.emergency_pressed():
@@ -72,7 +113,9 @@ class MockGame:
     def __init__(self, bindings_keys=None, ground_y=600.0, ground_x=(-1e9, 1e9), ceiling_y=420.0, wall_x=None,
                  start_x=400.0, io_latency=1, drop_keys=(), torn_every=0, skip_every=0, no_player_frames=0,
                  freeze_at=None, respawn_at=None, release_mode='button-up', view_scale=0.75, start_frame=50000,
-                 io_absent=(), weave_reels_in=False, jitter_pxps=0.0):
+                 io_absent=(), weave_reels_in=False, jitter_pxps=0.0, cursor_recenters=False,
+                 crosshair_static=False, mouse_relative=False, floor_attaches=True, scan_unavailable=False,
+                 gh_reset_on_attach=True, camera_offset=(0.0, 0.0)):
         self.keys = dict(bindings_keys or {'right': 'D', 'left': 'A', 'jump': 'SPACE', 'grapple': 'LMB',
                                            'weave': 'RMB', 'retract': 'SHIFT'})
         self.ground_y, self.ground_x, self.ceiling_y, self.wall_x = ground_y, ground_x, ceiling_y, wall_x
@@ -83,6 +126,16 @@ class MockGame:
         self.io_absent = set(io_absent)         # oIO variables that do not exist (probe omits absent variables)
         self.weave_reels_in = weave_reels_in    # mock stand-in: weave held on a grapple shortens the rope
         self.jitter_pxps = jitter_pxps          # body velocity noise (never settles when > MOVE_MAX_PXPS)
+        self.cursor_recenters = cursor_recenters  # the game warps the cursor to the window centre every frame
+        self.crosshair_static = crosshair_static  # crosshair_tx/ty never follow the cursor (live finding)
+        self.mouse_relative = mouse_relative    # aim moves only with relative mouse motion (absolute ignored)
+        self.virtual_aim = (100.0, -60.0)       # relative-mode aim offset from the player (room px)
+        self.floor_attaches = floor_attaches    # a shot reaching the floor attaches there
+        self.scan_unavailable = scan_unavailable
+        self.gh_reset_on_attach = gh_reset_on_attach   # gh/gv read 0 once the shot is gone (unknown in the game)
+        self.camera_offset = camera_offset      # player's screen position minus the window centre (client px)
+        self.shot_vars = {'gh': 0.0, 'gv': 0.0, 'sx': None, 'sy': None, 'gx': None, 'gy': None}
+        self.cross0 = None
         self.view_scale = view_scale
         self.driver = None
         self.index = 0                      # frames produced
@@ -113,6 +166,23 @@ class MockGame:
     def room_name(self, idx):
         return 'room_Hub(mock)'
 
+    def all_vars(self, which):
+        pending = self.new_events                     # _row consumes pending new-instance events: keep them
+        row, _ = self._row(None, 0)
+        self.new_events = pending
+        if which == 'io':
+            return {k: v for k, v in (row['io'] or {}).items() if isinstance(v, (int, float))}
+        v = dict(((row['player'] or {}).get('vars')) or {})
+        v.update(mock_unrelated_counter=self.index % 7, mock_constant=3.0)
+        return {k: x for k, x in v.items() if isinstance(x, (int, float))}
+
+    def ground_profile(self, row):
+        if self.scan_unavailable:
+            return {'confidence': 'unavailable', 'reason': 'mock: scan unavailable'}
+        return {'confidence': 'estimate',
+                'right': {'clear_px': round(self.ground_x[1] - self.x, 1), 'end': 'edge'},
+                'left': {'clear_px': round(self.x - self.ground_x[0], 1), 'end': 'edge'}}
+
     def idle(self, writer=None):
         pass
 
@@ -125,6 +195,8 @@ class MockGame:
         if self.freeze_at is not None and self.index >= self.freeze_at:
             raise GameLost('no new game frame for 2.0 s (mock freeze)')
         self.index += 1
+        if self.driver:
+            self.driver.tick(self.index)
         self.counter += 2 if (self.skip_every and self.index % self.skip_every == 0) else 1
         self.t += H
         self._step()
@@ -142,8 +214,11 @@ class MockGame:
             io[a + '_pressed'] = int(io[a] and not self.prev_io.get(a))
             io[a + '_released'] = int(not io[a] and bool(self.prev_io.get(a)))
         io['jmp'] = int(io['jmp_held'] and not self.prev_io.get('jmp_held'))
-        mx, my = self.driver.cursor if self.driver else (640, 360)
+        mx, my = self.driver.aim_cursor if self.driver else (640, 360)
         io['aimx'], io['aimy'] = self._room(mx, my)
+        if self.mouse_relative:
+            io['aimx'], io['aimy'] = self.x + self.virtual_aim[0], self.y + self.virtual_aim[1]
+        self.aim_point = (io['aimx'], io['aimy'])
         for k in self.io_absent:
             io.pop(k, None)
         return io
@@ -168,25 +243,38 @@ class MockGame:
         # web shot spawn / cancel
         for kind in ('grapple', 'weave'):
             if io.get(kind + '_pressed') and self.shot is None and self.anchor is None:
-                tx, ty = io['aimx'], io['aimy']
+                tx, ty = self.aim_point
                 d = math.hypot(tx - self.x, ty - self.y) or 1.0
                 self.shot = {'id': self._new(OBJ_WEBSHOT), 'x': self.x, 'y': self.y, 'gh': 35 * (tx - self.x) / d,
                              'gv': 35 * (ty - self.y) / d, 'travelled': 0.0, 'kind': kind}
+                self.shot_vars.update(gh=self.shot['gh'], gv=self.shot['gv'], sx=self.x, sy=self.y)
         if self.shot and not io.get(self.shot['kind']):
             self.shot = None
         if self.shot:
             s = self.shot
+            x0, y0 = s['x'], s['y']
             s['x'] += s['gh']
             s['y'] += s['gv']
             s['travelled'] += 35
+            self.shot_vars.update(gx=s['x'], gy=s['y'])
+
+            def on_ray_y(yy):                      # the hit point stays on the shot's straight line
+                t = (yy - y0) / s['gv'] if s['gv'] else 0.0
+                return (x0 + t * s['gh'], yy)
             hit = None
             if self.ceiling_y is not None and s['y'] <= self.ceiling_y:
-                hit = (s['x'], self.ceiling_y)
+                hit = on_ray_y(self.ceiling_y)
+            elif self.floor_attaches and s['y'] >= self.ground_y and self.ground_x[0] <= s['x'] <= self.ground_x[1]:
+                hit = on_ray_y(self.ground_y)
             elif self.wall_x is not None and s['x'] >= self.wall_x:
-                hit = (self.wall_x, s['y'])
+                t = (self.wall_x - x0) / s['gh'] if s['gh'] else 0.0
+                hit = (self.wall_x, y0 + t * s['gv'])
             if s['travelled'] > wm.MAX_GDIST:
                 self.shot = None
             elif hit:
+                self.shot_vars.update(gx=hit[0], gy=hit[1])
+                if self.gh_reset_on_attach:
+                    self.shot_vars.update(gh=0.0, gv=0.0)
                 if s['kind'] == 'grapple':
                     self.anchor = (hit[0], hit[1], math.hypot(hit[0] - self.x, hit[1] - self.y))
                 else:
@@ -245,7 +333,10 @@ class MockGame:
             self.pid += 1
             self.x, self.y, self.vx, self.vy = 400.0, self.ground_y - R, 0.0, 0.0
         self.prev_io = io
-        self.cam = (self.x - 640 * self.view_scale, self.y - 360 * self.view_scale)   # camera follows the player
+        self.cam = (self.x - (640 + self.camera_offset[0]) * self.view_scale,
+                    self.y - (360 + self.camera_offset[1]) * self.view_scale)   # camera follows the player
+        if self.cursor_recenters and self.driver:
+            self.driver.cursor = (self.driver.client[0] / 2.0, self.driver.client[1] / 2.0)   # SetCursorPos-like
 
     def _jit(self):
         return self.jitter_pxps * (1 if self.index % 2 else -1)
@@ -265,8 +356,10 @@ class MockGame:
                'frame_start': self.counter * 16667, 'fast_ms': 0.4}
         self.new_events = []
         if has_player:
-            mx, my = self.driver.cursor if self.driver else (640, 360)
-            ctx, cty = self._room(mx, my)
+            ctx, cty = getattr(self, 'aim_point', self._room(640, 360))
+            if self.crosshair_static:
+                self.cross0 = self.cross0 or (ctx, cty)
+                ctx, cty = self.cross0
             g = self._grounded() and self.anchor is None
             s = self.shot
             v = {'ground': 9001 if g else NOONE, 'webwalk': NOONE,
@@ -274,9 +367,8 @@ class MockGame:
                  'weave': (row['io'] or {}).get('weave', 0), 'retract': 0,
                  'in_water': 0, 'riding_skateboard': 0, 'parachute': 0, 'locked': 0, 'ground_angle': 0,
                  'webshot_node': s['id'] if s else NOONE, 'crosshair_tx': ctx, 'crosshair_ty': cty,
-                 'gx': (s['x'] if s else (self.anchor[0] if self.anchor else None)),
-                 'gy': (s['y'] if s else (self.anchor[1] if self.anchor else None)),
-                 'gh': s['gh'] if s else 0.0, 'gv': s['gv'] if s else 0.0}
+                 'gx': self.shot_vars['gx'], 'gy': self.shot_vars['gy'], 'sx': self.shot_vars['sx'],
+                 'sy': self.shot_vars['sy'], 'gh': self.shot_vars['gh'], 'gv': self.shot_vars['gv']}
             row['player'] = {'id': self.pid, 'xy': [self.x, self.y], 'image_angle': 0.0, 'vars': v,
                              'body': {'pos_m': [self.x * sc, self.y * sc], 'vel_mps': [self.vx * sc, self.vy * sc],
                                       'angle_rad': 0.0, 'angvel_rps': 0.0, 'pos_px': [self.x, self.y],
