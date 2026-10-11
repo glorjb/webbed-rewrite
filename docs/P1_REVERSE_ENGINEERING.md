@@ -463,7 +463,7 @@ retract key is confirmed; W3 (permanent webs) → `W5_weave_line`, `W5_weave_sna
 - **Not automated:** cutting a permanent web (control not recovered); skateboard scenarios.
 
 **Verification status:**
-- 77 runner unit tests pass against `autoref/mock.py`, a fake game with crude dynamics. It is **not** the
+- 81 runner unit tests pass against `autoref/mock.py`, a fake game with crude dynamics. It is **not** the
   recovered physics, and its output is never written to the real capture root. They cover:
   - the happy path and probe-compatible files;
   - missed inputs with retries and preservation;
@@ -539,6 +539,17 @@ retract key is confirmed; W3 (permanent webs) → `W5_weave_line`, `W5_weave_sna
     - a walk acknowledged by `oIO` that doesn't move the spider within 30 frames stops as `not_controllable`.
   - The pause/menu GML (`oGameManager` / menu objects) is still to be decoded locally; the `-StateScan`
     indicator is a measurement.
+- **Fourth live run (2026-10-11): first real scenarios executed.**
+  - `M2_walk_short` ended `not_controllable` twice on its first (rightward) walk.
+  - `M2_walk_flat` left the ground about 633 px **left** of its start, on a slope of about 41°.
+  - Every one of these runs walked right first, which is consistent with an obstacle on the right at that spot.
+    This is **not yet confirmed**: `analyze_walk.py` measures it from the captures (phase classification,
+    sampling consistency, support transitions).
+  - Runner changes:
+    - an acknowledged walk without movement is `blocked` (physics running) or `not_controllable` (bit-identical
+      pose and velocity);
+    - `M2_walk_dir` walks one free direction on verified ground.
+  - No walking physics is validated until a capture passes `test_walk_plateau_speed`.
 - **False "mouse moved by user".** The detector compared the cursor with where the runner had put it. That breaks
   when the game moves or locks the cursor; it is the likely cause, and `-AimScan` measures it. Takeover now uses
   low-level hooks: the runner's input is tagged (`dwExtraInfo`), and only physical input (or another program's

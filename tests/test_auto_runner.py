@@ -31,6 +31,7 @@ from autoref import runner as RN                                # noqa: E402
 from autoref.inputhook import TakeoverMonitor                   # noqa: E402
 
 DIAG = os.path.join(HERE, '..', 'tools', 'reference', 'diagnose_capture.py')
+WALK = os.path.join(HERE, '..', 'tools', 'reference', 'analyze_walk.py')
 from autoref.runner import Config, ConsoleUI, Runner            # noqa: E402
 
 
@@ -501,6 +502,67 @@ class MockRun(unittest.TestCase):
         with self.assertRaises(AbortRun):
             self.run_ids(r, ['M2_walk_short'])
         self.assertFalse([e for e in d.events if e[0] == 'down'])
+
+    # ------------------------------------------------------------------ live failure 8: M2 did not move
+    def test_blocked_spider_is_blocked_not_paused_and_not_retried(self):
+        """Live 2026-10-11: M2_walk_short failed twice as not_controllable on the first (right) walk. A spider
+        pushing against an obstacle (physics running) is now 'blocked'; a frozen simulation stays not_controllable."""
+        g, d, r = self.make(retries=2, block_right_x=411.5)
+        res = self.run_ids(r, ['M2_walk_short'])
+        self.assertEqual(len(res), 1)                                  # same spot would block again
+        self.assertPreservedFailure(r, res[0], 'blocked')
+        nm = res[0]['observations']['no_motion'][0]
+        self.assertFalse(nm['physics_frozen'])
+        self.assertEqual(nm['support'], 'ground')
+        self.assertEqual(d.held, set())
+
+    def test_directional_walk_uses_the_free_side(self):
+        g, d, r = self.make(block_right_x=411.5, ground_x=(-1000, 2000))
+        res = self.run_ids(r, ['M2_walk_dir'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        probe = res['observations']['direction_probe'][0]
+        self.assertEqual(probe['usable'], ['left'])
+        self.assertLess(probe['moved_px']['right'], 2.0)
+        s = cap.Session(os.path.join(self.root, res['session']))
+        walking = [f for f in s.frames if cap.support(f) == 'ground' and abs(f['io'].get('hm') or 0) == 1]
+        self.assertGreaterEqual(len(walking), 60)
+
+    def test_directional_walk_respects_the_ground_scan(self):
+        g, d, r = self.make(ground_x=(250, 2000))          # 150 px left, 1600 right: only right is long enough
+        res = self.run_ids(r, ['M2_walk_dir'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        self.assertEqual(res['observations']['direction_probe'][0]['usable'], ['right'])
+        g, d, r = self.make(ground_x=(250, 600))           # neither side has 380 px: skipped before any input
+        res = self.run_ids(r, ['M2_walk_dir'])[0]
+        self.assertEqual((res['status'], res['failure']['kind']), ('skipped', 'insufficient_space'))
+        self.assertFalse([e for e in d.events if e[0] == 'down'])
+
+    def test_analyze_walk_measures_real_movement_from_captures(self):
+        g, d, r = self.make(retries=0, block_right_x=411.5)
+        blocked = self.run_ids(r, ['M2_walk_short'])[0]['preserved_at']
+        g, d, r = self.make(retries=0, ground_x=(-200, 2000), trust_ground=True)
+        ok = os.path.join(self.root, self.run_ids(r, ['M2_walk_flat'])[0]['session'])
+        g, d, r = self.make(retries=0, ground_x=(0, 600), scan_unavailable=True, trust_ground=True)
+        fell = self.run_ids(r, ['M2_walk_short'])[0]['preserved_at']
+        sys.path.insert(0, os.path.join(HERE, '..', 'tools', 'reference'))
+        import analyze_walk as AW
+        a = AW.analyze(blocked)
+        self.assertEqual(a['phases'][0]['class'], 'blocked_on_ground')
+        self.assertIn('consistent', a['sampling']['verdict'])
+        b = AW.analyze(ok)
+        self.assertEqual([p['class'] for p in b['phases']], ['moved', 'moved'])
+        self.assertTrue(b['level_walk'])
+        for lw in b['level_walk']:
+            self.assertAlmostEqual(lw['plateau_px_step'], 3.5, places=3)
+        c = AW.analyze(fell)
+        self.assertGreater(c['free_flight']['pairs'], 5)                # mock free flight uses the model: ~0 residual
+        self.assertLess(c['free_flight']['max_abs_residual_pxps'], 1e-6)
+        self.assertTrue(any(t['support'] == 'air' for t in c['transitions']))
+        out = subprocess.run([sys.executable, WALK, '--tests', ok, blocked, fell], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn('blocked_on_ground', out.stdout)
+        self.assertIn('PASS  test_walk_plateau_speed', out.stdout)
+        self.assertTrue(os.path.isdir(blocked) and os.path.isdir(fell))  # originals untouched
 
     # ------------------------------------------------------------------ diagnostics
     def test_aim_scan_finds_mouse_following_variables(self):

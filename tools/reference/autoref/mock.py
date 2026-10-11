@@ -119,7 +119,8 @@ class MockGame:
                  io_absent=(), weave_reels_in=False, jitter_pxps=0.0, cursor_recenters=False,
                  crosshair_static=False, mouse_relative=False, floor_attaches=True, scan_unavailable=False,
                  gh_reset_on_attach=True, camera_offset=(0.0, 0.0), extra_solids=(), menu_frames=0,
-                 persistent_menus=False, menu_window=None, paused_owner=True, scripted_user_menu=False):
+                 persistent_menus=False, menu_window=None, paused_owner=True, scripted_user_menu=False,
+                 block_right_x=None):
         self.keys = dict(bindings_keys or {'right': 'D', 'left': 'A', 'jump': 'SPACE', 'grapple': 'LMB',
                                            'weave': 'RMB', 'retract': 'SHIFT'})
         self.ground_y, self.ground_x, self.ceiling_y, self.wall_x = ground_y, ground_x, ceiling_y, wall_x
@@ -147,6 +148,7 @@ class MockGame:
         self.menu_window = menu_window or ((0, menu_frames) if menu_frames else None)   # frame-index range: open
         self.paused_owner = paused_owner        # oGameManager.paused mirrors the open menu (else only is_open)
         self.scripted_user_menu = scripted_user_menu
+        self.block_right_x = block_right_x      # an obstacle the spider pushes against (physics keeps running)
         self.shot_vars = {'gh': 0.0, 'gv': 0.0, 'sx': None, 'sy': None, 'gx': None, 'gy': None}
         self.cross0 = None
         self.view_scale = view_scale
@@ -402,6 +404,9 @@ class MockGame:
                 self.vy = -wm.JUMP_POWER * wm.ROOM_SPEED
             self.x += self.vx * H
             self.y += self.vy * H
+            if self.block_right_x is not None and self.x > self.block_right_x - R:
+                self.x = self.block_right_x - R
+                self.vx = 1e-4 * (1 if self.index % 2 else -1)     # contact solver jitter: not frozen
         else:
             dvx, dvy = wm.player_free_flight_dv(self.vx, self.vy)
             self.vx += dvx

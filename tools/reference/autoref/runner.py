@@ -33,6 +33,7 @@ from .scenarios import (ACK_FRAMES, SCENARIOS, SIGHT_ANGLES, SUITES, Ctx, Relati
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RETRYABLE = {'missed_input', 'capture_invalid', 'inconsistent', 'timeout', 'aim_failed', 'not_controllable'}
+# 'blocked' is NOT retried: the same spot blocks again; the failed recording is kept for analyze_walk.py
 HANDS_OFF_S = 3.0                    # the user must not have touched mouse/keyboard for this long before arming
 SETUP_WINDOW_FRAMES = 15 * 60        # after a setup announcement: time to start moving the spider into place
 PREPARE_TIMEOUT_FRAMES = 120 * 60    # setup + readiness (closing menus, unpausing, positioning) may take a while
@@ -462,6 +463,7 @@ class Runner:
         ctx = Ctx(self.d, self.b, log=writer.log)
         ctx.row = self.last_row
         ctx.aimer, ctx.aim_sources = aimer, aim_sources
+        ctx.ground_profile = res.get('ground_profile')
         if getattr(aimer, 'sighting', None):
             writer.log(dict(event='sighting_used', P=aimer.P, **aimer.sighting))
         issues = []
@@ -520,8 +522,12 @@ class Runner:
         res['ground_profile'] = prof
         conf = prof.get('confidence')
         if conf == 'estimate':
-            short = {d: (prof[d]['clear_px'], need, prof[d].get('end')) for d, need in sc.space.items()
-                     if prof.get(d) and prof[d]['clear_px'] < need}
+            if 'either' in sc.space:
+                best = max((prof.get(d) or {}).get('clear_px', 0) for d in ('right', 'left'))
+                short = {} if best >= sc.space['either'] else {'either': (best, sc.space['either'], 'both sides')}
+            else:
+                short = {d: (prof[d]['clear_px'], need, prof[d].get('end')) for d, need in sc.space.items()
+                         if prof.get(d) and prof[d]['clear_px'] < need}
             if short:
                 res['status'] = 'skipped'
                 res['failure'] = {'kind': 'insufficient_space', 'msg': 'nothing sent: estimated clear ground %s '

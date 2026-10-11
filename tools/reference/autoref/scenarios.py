@@ -129,23 +129,43 @@ class Ctx:
         lat_dn = yield from self.await_ack(action, True)
         b0 = S.body(self.row)
         x0 = b0['pos_px'][0] if b0 else None
+        trace = []
         seen = 1
         for k in range(max(frames - lat_dn, 0)):
             yield
             seen += 1 if B.held(S.io(self.row), action) else 0
-            if expect_motion and k + 1 == self.MOTION_FRAMES and x0 is not None:
+            if expect_motion and x0 is not None and k < self.MOTION_FRAMES:
                 b = S.body(self.row)
-                if b and abs(b['pos_px'][0] - x0) < 2.0:
+                trace.append(tuple(b['pos_px']) + tuple(b['vel_pxps']) if b else None)
+                if k + 1 == self.MOTION_FRAMES and b and abs(b['pos_px'][0] - x0) < 2.0:
                     self.release(action)
-                    raise ScenarioFailure('not_controllable', 'oIO shows %s held for %d frames but the spider did not '
-                                          'move: the game is paused, a menu is open, or the spider is stuck'
-                                          % (action, self.MOTION_FRAMES))
+                    self._no_motion(action, trace)
             if check:
                 check(self)
         self.release(action)
         lat_up = yield from self.await_ack(action, False)
         self.holds.append({'action': action, 'requested_frames': frames, 'observed_frames': seen + max(lat_up - 1, 0),
                            'press_latency_frames': lat_dn, 'release_latency_frames': lat_up})
+
+    def _no_motion(self, action, trace):
+        """An acknowledged walk did not move the spider. Classify from the player's own physics, no guessing:
+        position AND velocity bit-identical over the window -> the simulation is not stepping (paused / menu);
+        any change -> physics runs and something stops the spider (wall, steep slope, stuck)."""
+        v = S.pvars(self.row)
+        info = {'action': action, 'frames': len(trace), 'support': S.support(self.row), 'ground': v.get('ground'),
+                'ground_angle': v.get('ground_angle'), 'slipping': v.get('slipping'), 'locked': v.get('locked'),
+                'webwalk': v.get('webwalk'), 'pos': list(trace[-1][:2]) if trace and trace[-1] else None}
+        frozen = bool(trace) and None not in trace and len(set(trace)) == 1
+        info['physics_frozen'] = frozen
+        self.note('no_motion', info)
+        if frozen or v.get('locked') not in (None, 0, 0.0, False):
+            raise ScenarioFailure('not_controllable', 'oIO shows %s held but the spider\'s position and velocity did not '
+                                  'change at all for %d frames (simulation not stepping: paused / menu / locked=%s)'
+                                  % (action, len(trace), v.get('locked')))
+        raise ScenarioFailure('blocked', 'oIO shows %s held and physics runs, but the spider did not move in %d frames: '
+                              'blocked in that direction (support=%s, ground_angle=%s, slipping=%s); try the other '
+                              'direction or another spot' % (action, len(trace), info['support'], info['ground_angle'],
+                                                            info['slipping']))
 
     def settle(self, timeout=600, need_support='any'):
         """Wait until the spider is supported and at rest (SETTLE_FRAMES frames below MOVE_MAX_PXPS)."""
@@ -518,6 +538,42 @@ def m2_walk_flat(ctx):
         yield from ctx.wait(120, check=g)
 
 
+def m2_walk_dir(ctx, hold=90, probe_frames=12):
+    """M2, one direction, on verified ground: short taps right and left find which way the spider can actually
+    move (both recorded), then ONE walk of `hold` frames in the free direction that has enough clear ground
+    (ground scan, when confident), then a stop. >= 60 frames at the plateau for test_walk_plateau_speed."""
+    yield from ctx.wait(LEAD_IN_FRAMES)
+    probe = {}
+    for action in ('right', 'left'):
+        ctx.mark()
+        b = S.body(ctx.row)
+        x0 = b['pos_px'][0] if b else 0.0
+        ctx.press(action)
+        yield from ctx.await_ack(action, True)
+        yield from ctx.wait(probe_frames)
+        ctx.release(action)
+        yield from ctx.await_ack(action, False)
+        b = S.body(ctx.row)
+        probe[action] = round((b['pos_px'][0] - x0) * (1 if action == 'right' else -1), 2) if b else 0.0
+        yield from ctx.settle(240)
+    prof = getattr(ctx, 'ground_profile', None) or {}
+    need = 3.5 * hold + 60
+    free = [a for a in ('right', 'left') if probe[a] >= 2.0]
+    if prof.get('confidence') == 'estimate':
+        roomy = [a for a in free if (prof.get(a) or {}).get('clear_px', 0) >= need]
+        free = roomy or []
+    ctx.note('direction_probe', {'moved_px': probe, 'usable': free, 'needed_px': need,
+                                 'scan': {d: (prof.get(d) or {}).get('clear_px') for d in ('right', 'left')}})
+    if not free:
+        raise ScenarioFailure('blocked', 'neither direction is usable here: probe moved %s px (need >= 2), scan clear %s '
+                              '(need %.0f px)' % (probe, {d: (prof.get(d) or {}).get('clear_px') for d in ('right', 'left')}, need))
+    action = max(free, key=lambda a: ((prof.get(a) or {}).get('clear_px', 0), probe[a]))
+    ctx.mark()
+    g = keep_grounded(origin=())
+    yield from ctx.hold(action, hold, check=g, expect_motion=True)
+    yield from ctx.wait(90, check=g)
+
+
 def m2_walk_short(ctx, hold=90):
     """M2 in less space: right 1.5 s, stop 1 s, left 1.5 s, stop 1 s, then the mirror (left first). Each hold
     still gives >= 60 frames at the plateau (enough for test_walk_plateau_speed) and the spider ends where it
@@ -703,6 +759,9 @@ class Scenario:
 
 
 SCENARIOS = {s.id: s for s in [
+    Scenario('M2_walk_dir', 'M2', m2_walk_dir,
+             'Solid ground with >= 380 px (about 17 spider-lengths) clear on AT LEAST ONE side.',
+             needs=('right', 'left'), max_frames=1400, space={'either': 380}),
     Scenario('M2_walk_short', 'M2', m2_walk_short,
              'Flat solid ground with >= 380 px (about 17 spider-lengths) clear on BOTH sides.',
              needs=('right', 'left'), max_frames=1200, space={'right': 380, 'left': 380}),
@@ -731,7 +790,7 @@ SCENARIOS = {s.id: s for s in [
 ]}
 
 SUITES = {
-    'M2': ['M2_walk_short', 'M2_walk_flat'],                  # walking acceleration, stopping, max speed
+    'M2': ['M2_walk_dir', 'M2_walk_short', 'M2_walk_flat'],   # walking acceleration, stopping, max speed
     'W1': ['W1_attach_hang'],                                 # grapple projectile, attachment, hang, release
     'W2': ['W2_swing', 'W3_cut_mid_swing'],                   # grapple tension, swinging, release
     'W4': ['W4_retract_probe', 'W4_pull'],                    # pull / retract control: experiment, then scenario

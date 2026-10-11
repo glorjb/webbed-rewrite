@@ -72,6 +72,25 @@ existence is reported, not treated as "open". The runner waits only on real evid
 If the game is paused in a way the runner can't see, a walk stops after 30 frames (`not_controllable`), and an
 aimed shot is never fired (the aim doesn't respond).
 
+**Analysing walking recordings (including failed ones).**
+`python tools\reference\analyze_walk.py --tests <session dir> [<session dir> ...]` is read-only. It prints:
+- per-frame sampling consistency: a single player id, body equal to instance position, and dx equal to vx·h;
+- each walking-input phase, classified from the game's own variables: moved / blocked / steep / airborne /
+  locked / missing;
+- support transitions;
+- level-ground walking speed against the max_walkspd hypothesis (3.5 px/step);
+- free flight against the verified drag model.
+
+`--tests` runs the regression tests on *copies* of the sessions.
+
+**M2 scenarios.** If an acknowledged walk doesn't move the spider:
+- `blocked`: physics runs (position or velocity changes) but the spider doesn't move. It isn't retried, because
+  the same spot blocks again.
+- `not_controllable`: position and velocity are bit-identical for 30 frames, so the simulation isn't stepping.
+
+`M2_walk_dir` taps right and left to find a free side, then walks 90 frames in that direction only. It needs
+≥ 380 px of clear ground on one side.
+
 **Step by step (recommended order; each step is separate):**
 1. `-SelfTest`: no game needed. It must end with `SELF-TEST OK`.
 2. `-Check`: read-only; it changes no focus and sends no input. It reports a snapshot:
