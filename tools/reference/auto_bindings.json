@@ -1,0 +1,11 @@
+{
+ "note": "Candidate keys per action, tried in order by calibration (auto_record.ps1 -Calibrate). Webbed's default bindings were NOT recovered from the binary; these are guesses that calibration confirms against the game's own input object (oIO). The confirmed result is saved to DesktopPlaygroundLocal\\auto_bindings.local.json, outside the repository.",
+ "candidates": {
+  "right": ["D", "RIGHT"],
+  "left": ["A", "LEFT"],
+  "jump": ["SPACE", "W", "UP"],
+  "grapple": ["LMB", "RMB"],
+  "weave": ["RMB", "LMB", "E", "Q"],
+  "retract": ["SHIFT", "S", "CTRL", "DOWN", "MMB"]
+ }
+}

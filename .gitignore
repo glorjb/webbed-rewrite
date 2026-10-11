@@ -10,3 +10,4 @@ extracted/
 *.lift
 *.asm
 ghidra_c/
+__pycache__/

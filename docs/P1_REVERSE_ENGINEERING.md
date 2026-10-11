@@ -3,10 +3,14 @@
 Target: Steam build **7679547**: `webbed.exe` SHA-256 `c63cecb6…16dde`, `data.win` SHA-256 `6caf485d…5398c`.
 All addresses are valid **only** for this build.
 
-**Status (2026-10-11): P1 in progress.** The core physics, web mechanics, VFX tables, sound mappings and
-frame order are recovered from the binary with evidence. Reference-capture tooling and regression tests
-are ready. **No behaviour has been validated against the running original yet:** no captures exist.
-Nothing in this document is claimed to be behaviourally faithful until the capture tests pass.
+**Status (2026-10-11, updated): P1 in progress; P2 not started.** The core physics, web mechanics, VFX tables,
+sound mappings and frame order are recovered from the binary with evidence.
+**Validated against the running original** (one M3 capture, see "First physics validation"): free flight
+with the scripted quadratic air drag, ground-jump velocity, and head-bump restitution. **Everything else is
+still unvalidated**: walking (M2), the web shot and grapple (W1/W2), and permanent webs (W3/W5) have no
+captures yet. An automated, state-aware recorder now exists for them (section 11). It has been tested only
+against a mock game; **live validation on Windows is pending.**
+Nothing in this document is claimed to be behaviourally faithful until the corresponding capture tests pass.
 
 ### Confidence levels
 - **Verified:** read from the binary and confirmed by an independent path, either a second artefact
@@ -158,6 +162,38 @@ Box2D step. `oPlayer_Step_2` / `oWeb_Step_2` (End Step) see post-step positions.
 | Slack dynamics (Step L54–L73) | `slack_v += r·slack…`, `clamp(slack_v, −1, 1)`, `slack += slack_v`, `clamp(slack, −1, 1)`, `avg_slack_v = lerp(avg, slack_v, 0.5)`, zeroed when \|slack\| and \|slack_v\| < 0.01 | Medium (lifter block order differs from source order) |
 | Attachment counters | `a.attached_webs++`, `o.attached_webs++` once per web (`marked_a/o`) | High |
 
+## 6b. Web shot and grapple (`oPlayer_Step_0`): a separate system from permanent webs
+The player has **two independent web systems**:
+- **Grapple:** a web-shot projectile, then a force the player applies to itself.
+  - State lives on `oPlayer`: `gx, gy, gh, gv, sx, sy, slack, retract, webshot_node`.
+  - The projectile is an `oWebshotNode`.
+  - No `oWeb` segment is involved in the pull.
+- **Permanent webs:** `oWeb` segments between `oWebNode`s, with their own tension and snap rules (section 6).
+
+Do not merge the two into a generic rope.
+
+| Rule | Recovered form | Confidence |
+|---|---|---|
+| Firing (L183–L219) | `gh, gv = lengthdir_x/y(web_shot_speed, point_direction(sx, sy, crosshair_tx, crosshair_ty))` (px/step, so launch speed 35 px/step); `retract = 0`; `slack = 0.75`; `webshot_node = instance_create_layer(gx, gy, "Webs", oWebshotNode)` | High (lifted); not yet checked against a capture |
+| Shot motion (L912–L916) | every Step while the shot exists: `webshot_node.phy_position = (gx, gy)`, `webshot_node.phy_speed = (gh, gv)`. `oWebshotNode` is a **kinematic** body (OBJT, Verified), so the frame's physics step moves it by exactly `(gh, gv)` px | High (lifted); the capture tests `test_shot_body_follows_shot_state` / `test_shot_launch_speed` are ready |
+| Grapple pull structure (L681–L729) | if `d > 16`: `w = sqr(1 − clamp((d − 10)/64, 0, 1))`, `c = min(max(5, |v|), d/5)`; `F = lerp(lengthdir(P, dir_g), lengthdir(c, dir_g) − v − (0, 10·phy_mass), w)`; `physics_apply_force(phy_com_x, phy_com_y, F)`. `d = distance_to_point(gx, gy)` measures from the **bounding box**, `dir_g = point_direction(phy_com, g)`, `v` in px/step | High (structure) |
+| Pull strength `P` (L661–L677) | the weave branch starts with `weave_pull_power · clamp(d/10, 0, 1)` (L661, L666 hand-verified); the further terms on L667–L677 are **unresolved**; `pull_power = 5` exists in `init_spider_variables` | **Unknown** |
+| Near-anchor regime | `d ≤ 16`: no pull force from this block | High (structure) |
+| Attachment / release transitions | which variable flips on attach (`attached`, `grapple`, `webshot_node`), and whether release happens on button-up or by toggle | **Unknown.** The automated W1/W2 runs log every change of these variables frame by frame and record the observed release mode |
+
+`tools/reference/analyze_grapple.py` measures `P` from W* captures without decoding it:
+1. It inverts Box2D's semi-implicit Euler step over each hanging frame pair, with no horizontal input and no
+   contact.
+2. It subtracts gravity and, under hypothesis A, the verified air drag.
+3. It solves the structure above for `P`. The component perpendicular to `dir_g` must be about 0 if the
+   structure is right.
+
+It reports how `P` depends on `d` and `|v|`, and the residual of each candidate formula. Synthetic data generated
+with a known `P` is recovered exactly (`tests/test_analyze_grapple.py`). Three sensitivities need care:
+- `d` depends on the player's mask bounding box, which isn't recovered (`--bbox-offset`).
+- Whether the air drag also acts while grappling is not verified (hypotheses A and B).
+- Frames with `w ≈ 1` carry no information about `P`.
+
 ## 7. Procedural spider animation (`draw_spider`, ~820 structured lines; partially read)
 - **Per-skin geometry** (`set_spider_skin`, 7 skins, **High**):
   - legspan 30/30/44/50/50/38/70
@@ -229,7 +265,7 @@ Box2D step. `oPlayer_Step_2` / `oWeb_Step_2` (End Step) see post-step positions.
 - **Player SFX:** death `aCartoonyDeath` with 10 `pt_puff_cloud`, angular velocity `sign(tilt_momentum+vx)·500`, and respawn after `alarm[0] = 75`; respawn `aPopMouth1`. *High.*
 - **Shaders:** 7 recovered as source. *Verified.*
 
-## 9. Reference capture and regression tests (ready; no data yet)
+## 9. Reference capture and regression tests (M3 recorded; M2/W* pending)
 - `tools/reference/webbed_probe.py`:
   - **read-only polling**: `PROCESS_VM_READ` only, no debugger, no injected code, attaches only to this build's hash;
   - frame-synchronised to the runner's own frame counter, so it samples once per frame at 60 Hz;
@@ -247,7 +283,10 @@ Box2D step. `oPlayer_Step_2` / `oWeb_Step_2` (End Step) see post-step positions.
   from Δv, mass and gravity in analysis.
 
 ## 10. Still unverified / unresolved
-1. **No reference captures yet:** every runtime claim is unvalidated against the running game.
+1. **Only M3 is captured:** every runtime claim outside free flight, jumps and restitution is unvalidated
+   against the running game. M2 and W1–W5 are automated (section 11) but not yet recorded live.
+   - **Grapple pull strength `P`** (L661–L677) and the grapple attach/release state transitions (section 6b):
+     `analyze_grapple.py` will measure `P` from W* captures, and the decode must then agree with it.
 2. `draw_spider` leg-segment arithmetic, plus remaining `?` values in the large events
    (`oPlayer_Step_0` ~215, `draw_spider` ~300) caused by values lost at loop/join points.
 3. Branch conditions guarding clinging, walking cap and web pull in `oPlayer_Step_0`. The calls are known; the gates are partly unknown.
@@ -365,3 +404,74 @@ L1583  physics_apply_force(phy_com_x, phy_com_y, lengthdir_x(s*s*drag, point_dir
 - **P1 v1:** player flags were unknown; they are `phy_bullet = 1` and `phy_fixed_rotation = 1`.
 - **P1 v1 probe:** used a debugger with a hardware breakpoint. Replaced by pure read-only polling to meet
   the no-injection requirement.
+
+## 11. Automated reference recording (state-aware runner)
+Goal: record M2 and W1–W5 without manual play, keep the probe read-only, and never claim timing that wasn't measured.
+
+**Architecture** (`tools/reference/autoref/`, CLI `auto_runner.py`, launcher `auto_record.ps1`):
+- **State:** the existing probe (`webbed_probe.Game` / `Recorder`, unmodified) is imported, and its frame loop
+  is re-created so the runner can act between captures. Rows, torn detection and the slow lane are identical.
+  Sessions use the probe's file layout, so `capture_lib` and every existing test read them unchanged.
+  Runner-only data goes to `inputs.jsonl` / `auto_run.json`, which the capture loader ignores.
+- **Input:** OS-level `SendInput` (keyboard scan codes, mouse buttons, absolute cursor moves). There are no
+  memory writes and no injection. Inputs are sent only while the Webbed window is the foreground window.
+- **Feedback:**
+  - every press and release is acknowledged through the game's own input object `oIO`
+    (`hm`, `jmp`, `grapple`, `weave`, `retract`) within 8 frames; otherwise the attempt fails as `missed_input`;
+  - acknowledgement latency and the held duration the game actually saw are recorded per input;
+  - aiming is closed-loop on the player's `crosshair_tx/ty`: the screen-to-room mapping is measured from two
+    probe moves, then refined by Newton steps to within 2°.
+- **Readiness:**
+  - player and Box2D body present, `oIO` present, not `locked`;
+  - no shot, grapple or weave active; not in water, on a skateboard or under a parachute;
+  - the required support (`ground` for every scenario);
+  - at rest (|v| < 1 px/s for 30 frames).
+- **Judgement per attempt:**
+  - the scenario's own checks (shot appeared, attached, detached, landed, stayed on ground, new `oWeb` created);
+  - frame consistency: counter monotonic, no room change, no respawn (player id change or a jump over 64 px),
+    world unchanged;
+  - the same quality gate as the tests (`capture_lib.Session`: coverage ≥ 90 %, torn ≤ 5 %, valid rows).
+- **Preservation:**
+  - failed attempts are moved to `captures_failed/` with their `auto_run.json`; nothing is deleted;
+  - a run may only move sessions it created itself;
+  - passing sessions stay in `captures/`, where the tests read them;
+  - transient failures (missed input, invalid capture, inconsistency, timeout, aim) are retried.
+- **Safety:** every stop releases all held keys and buttons. Stops:
+  - F12 or Pause;
+  - focus loss;
+  - physical mouse takeover;
+  - a watchdog thread, if the loop stalls for 0.75 s with inputs held;
+  - Ctrl+C, any exception, and `atexit`.
+- **Bindings:** Webbed's default bindings are not recovered. Calibration tries candidate keys and keeps the
+  first one `oIO` reacts to. The result is stored in `DesktopPlaygroundLocal\auto_bindings.local.json`.
+
+**Scenarios** (IDs from REFERENCE_TEST_PROCEDURE.md): M2 → `M2_walk_flat`; W1 → `W1_attach_hang`;
+W2 → `W2_swing`, `W3_cut_mid_swing`, `W4_pull`; W3 (permanent webs) → `W5_weave_line`, `W5_weave_snap`.
+- **Inferred, to be confirmed by the first live run:**
+  - the grapple "attached" predicate (`attached` or `grapple` set, no shot in flight);
+  - the anchor = `(gx, gy)`;
+  - the weave gesture (hold weave until the shot ends, then release);
+  - the variable meanings of `oIO`.
+
+  Raw variable transitions are logged, so a wrong interpretation is visible in the data.
+- **Not automated:** cutting a permanent web (control not recovered); skateboard scenarios.
+
+**Verification status:**
+- 27 runner unit tests pass against `autoref/mock.py`, a fake game with crude dynamics. It is **not** the
+  recovered physics, and its output is never written to the real capture root. They cover:
+  - the happy path and probe-compatible files;
+  - missed inputs with retries and preservation;
+  - torn and skipped frames;
+  - no player;
+  - a frozen game;
+  - a respawn;
+  - no surface; walking off a ledge;
+  - a missing binding;
+  - toggle-mode release;
+  - emergency stop; focus loss; the watchdog;
+  - existing captures untouched;
+  - calibration;
+  - the aim fallback from `crosshair_tx/ty` to `oIO.aimx/aimy`; a clean failure without aim feedback;
+  - `-Check` working without focus.
+- **The Windows input driver and the live provider have not been run against Webbed yet.**
+- Mock latencies are synthetic; real input latency and hold accuracy will be reported by the first live run.

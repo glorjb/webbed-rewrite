@@ -31,7 +31,64 @@ Hotkeys while recording (the game still receives the keys):
 | **F10** | add a step marker (use where a step below says "marker") |
 | **Ctrl+F12** | finish, save and exit the probe |
 
-## Next recordings: M2, W1, W2, W3 (short version)
+## Automated recording (recommended)
+The automated runner plays the scenarios itself with ordinary keyboard and mouse input. It uses the read-only
+probe above to watch the game every frame. **Status: tested only against a mock game in the cloud; the first
+live run on your PC is the real test.** Report anything odd.
+
+**One-time:**
+1. `powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -SelfTest`
+   This doesn't need the game. It must end with `SELF-TEST OK`.
+2. Start Webbed, enter a level, and stand on solid ground. Then run:
+   `powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -Check`
+   This sends no input. It must say `readiness: READY`.
+3. `powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -Calibrate`
+   The spider moves, jumps and shoots a web or two while the runner finds which key does what. Keys are
+   confirmed through the game's own input object. The result is saved to
+   `DesktopPlaygroundLocal\auto_bindings.local.json`. A line saying `no reaction in oIO` for every candidate
+   of an action means that action needs a key added to `tools\reference\auto_bindings.json`.
+
+**Each session:**
+`powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -All`
+(or `-Suite M2,W1`, or `-Scenario W1_attach_hang`)
+
+- Before each suite the console describes the spot it needs. Walk the spider there in the game, switch back
+  to the console and press Enter. The runner then focuses the game window itself. Answer `s` to skip a suite,
+  or `q` to quit.
+- Then **don't touch the mouse or keyboard** until the console says the suite is done.
+- **Emergency stop: F12 or Pause/Break.** Alt-Tabbing away or moving the mouse also stops the run.
+  Every held key and button is released on any stop.
+
+| Suite | What it does (scenario IDs) | Spot needed |
+|---|---|---|
+| **M2** | walk right 4 s, stop 2 s, walk left 4 s, stop 2 s (`M2_walk_flat`) | flat solid ground, ≥ 15 spider-lengths clear to the right |
+| **W1** | aims straight up, shoots, hangs 8 s, releases, lands (`W1_attach_hang`) | ceiling/branch 4–8 spider-lengths straight above |
+| **W2** | swings at 45° right and left (`W2_swing`); releases at the bottom of the swing, 3× (`W3_cut_mid_swing`); attaches at ~20° and holds retract 3 s (`W4_pull`) | ceiling reachable at 45° both sides, open space below; then a wall ~6 lengths away at ~20° |
+| **W3** | weaves a permanent web, watches it, loads it (`W5_weave_line`); weaves and jerks it to provoke a snap (`W5_weave_snap`) | a wall 4–8 lengths away at ~20° up-right, open space to the left |
+
+For each scenario the runner:
+1. waits until the spider is controllable and at rest;
+2. records automatically (same files as `record.ps1`, in `DesktopPlaygroundLocal\captures\`);
+3. checks that every input reached the game, that the expected things happened (shot, attachment, release,
+   landing, new web), that frames are consistent (no respawn, no room change), and that the capture passes the
+   quality gate.
+
+It retries transient failures once. Failed recordings are **kept** in `DesktopPlaygroundLocal\captures_failed\`
+together with `auto_run.json`, which explains why they failed. They are kept out of `captures\` so they don't
+break the test run.
+
+At the end it runs the full test suite and writes `DesktopPlaygroundLocal\auto_runs\<time>\report.md`, which
+contains:
+- per scenario: pass or fail, the reason, measured input latency (frames), and observations (walk plateau and
+  stop times, attach and release frames, the release mode, aim accuracy);
+- the relevant test results.
+
+Send me that report. Exit codes: 0 all good, 1 failures (see the report), 2 not ready / not started, 3 aborted.
+
+The runner sends inputs through Windows exactly like a real keyboard and mouse. It never writes to the game's
+memory. Timing is measured from what the game itself saw, and is reported, not assumed.
+
+## Next recordings: M2, W1, W2, W3 (short version, manual)
 Before each recording: be in a level on **solid ground** (`-Check` says READY and `support=ground`), away from
 existing webs. Then run `record.ps1 -Scenario <ID>`, press F9, do the steps, press F9, then Ctrl+F12, and check
 it prints `OK`.
@@ -41,7 +98,7 @@ it prints `OK`.
 | **M2_walk_flat** | On long flat ground: hold **right** 4 s, release 2 s, hold **left** 4 s, release 2 s. |
 | **W1_attach_hang** | Under a ceiling about 4–8 spider-lengths up: shoot one web straight up and hang without input for 8 s. Then release it and let the spider fall to the ground. |
 | **W2_swing** | Shoot a web diagonally ahead (about 45°) and swing with no input for 8 s, then release. Repeat once on the other side. |
-| **W3_release_mid_swing** | Shoot diagonally, swing 3 s, **release** the web at the bottom of the swing, and land. Repeat 3 times. |
+| **W3_cut_mid_swing** | Shoot diagonally, swing 3 s, **release** the web at the bottom of the swing, and land. Repeat 3 times. |
 
 These check:
 - that the web-shot projectile follows the recovered code exactly (velocity, position, 35 px/step launch speed);

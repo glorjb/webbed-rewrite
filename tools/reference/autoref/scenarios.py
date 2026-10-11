@@ -1,0 +1,436 @@
+"""Scripted, state-aware reference scenarios.
+
+A scenario is a generator function `fn(ctx)`. Every bare `yield` hands control back to the runner, which
+captures the next game frame and stores it in `ctx.row` before resuming the generator. Waiting helpers are
+generators too and must be called with `yield from`. A scenario fails by raising ScenarioFailure(kind, msg).
+
+Inputs are never assumed to arrive: each press/release is acknowledged by the game's own input object (oIO)
+within ACK_FRAMES frames, and the measured latency and held duration (in game frames) are recorded. No
+frame-perfect timing is claimed: the report shows the measured distribution.
+
+Scenario IDs follow docs/REFERENCE_TEST_PROCEDURE.md so the existing tests pick the captures up
+(M2_walk_flat, W1_attach_hang, W2_swing, W3_cut_mid_swing, W4_pull). The permanent-web suite uses W5_* IDs
+(the procedure's W5 "web bridge" family), because W3 is already the grapple-release scenario.
+"""
+import math
+
+from . import bindings as B
+from . import state as S
+
+ACK_FRAMES = 8               # oIO must reflect a press/release within this many game frames
+LEAD_IN_FRAMES = 30          # recorded at rest before the first input (onset reference)
+GRAVITY_DV = 10 / 0.03 / 60  # px/s per step (sim/webbed_model.gravity_dv_pxps_per_step)
+
+
+class ScenarioFailure(Exception):
+    """kind: not_ready | missed_input | setup_invalid | binding_missing | aim_failed | timeout |
+    release_failed | no_web_created | capture_invalid | inconsistent | aborted | game_lost"""
+    def __init__(self, kind, msg):
+        super().__init__('%s: %s' % (kind, msg))
+        self.kind, self.msg = kind, msg
+
+
+class Ctx:
+    def __init__(self, driver, bindings, log=None):
+        self.driver, self.bindings = driver, bindings
+        self.log = log or (lambda e: None)
+        self.row = self.prev = None
+        self.frames = 0                  # frames observed by this scenario
+        self.new_webs = 0                # oWeb instances created since the scenario started
+        self.marker = 0
+        self.acks = []                   # {'action', 'edge', 'latency_frames'}
+        self.holds = []                  # {'action', 'requested_frames', 'observed_frames', ...}
+        self.transitions = []            # (frame, scope, var, old, new)
+        self.obs = {}                    # scenario observations (measured, not asserted)
+        self.track_transitions = False
+
+    # ---------------------------------------------------------------- called by the runner each frame
+    def observe(self, row):
+        self.prev, self.row = self.row, row
+        self.frames += 1
+        self.new_webs += S.new_webs(row)
+        if self.track_transitions:
+            for t in S.transitions(self.prev, row):
+                self.transitions.append((row['frame'],) + t)
+
+    @property
+    def frame(self):
+        return self.row['frame'] if self.row else None
+
+    def note(self, key, value):
+        self.obs.setdefault(key, []).append(value)
+
+    # ---------------------------------------------------------------- primitive inputs (no waiting)
+    def _key(self, action):
+        k = self.bindings.key(action)
+        if not k:
+            raise ScenarioFailure('binding_missing', 'no key bound for %r (run auto_record.ps1 -Calibrate)' % action)
+        return k
+
+    def press(self, action):
+        k = self._key(action)
+        self.driver.press(k)
+        self.log({'event': 'press', 'action': action, 'key': k, 'after_frame': self.frame})
+
+    def release(self, action):
+        k = self._key(action)
+        self.driver.release(k)
+        self.log({'event': 'release', 'action': action, 'key': k, 'after_frame': self.frame})
+
+    def mark(self):
+        self.marker += 1
+        self.log({'event': 'marker', 'marker': self.marker, 'after_frame': self.frame})
+
+    # ---------------------------------------------------------------- waiting helpers (yield from)
+    def wait(self, n, check=None):
+        for _ in range(n):
+            yield
+            if check:
+                check(self)
+
+    def wait_until(self, pred, timeout, kind='timeout', msg='condition not reached', check=None):
+        """Wait until pred(row) is true; return frames waited. kind=None returns None on timeout instead."""
+        for i in range(timeout + 1):
+            if self.row is not None and pred(self.row):
+                return i
+            if i == timeout:
+                break
+            yield
+            if check:
+                check(self)
+        if kind is None:
+            return None
+        raise ScenarioFailure(kind, '%s (after %d frames)' % (msg, timeout))
+
+    def await_ack(self, action, down=True):
+        issued = self.frame
+        n = yield from self.wait_until(
+            lambda r: B.signal(S.io(r), action) == down, ACK_FRAMES, 'missed_input',
+            'oIO did not show %s %s' % (action, 'pressed' if down else 'released'))
+        self.acks.append({'action': action, 'edge': 'down' if down else 'up', 'latency_frames': n,
+                          'issued_after_frame': issued})
+        self.log({'event': 'ack', 'action': action, 'edge': 'down' if down else 'up', 'frame': self.frame,
+                  'latency_frames': n})
+        return n
+
+    def hold(self, action, frames, check=None):
+        """Press, wait for the oIO acknowledgement, release `frames` frames after the press was issued, wait for
+        the release acknowledgement. With equal press/release latency the game sees exactly `frames` held frames;
+        the frames it actually saw (from oIO) are recorded, so latency jitter shows up as a deviation."""
+        self.press(action)
+        lat_dn = yield from self.await_ack(action, True)
+        seen = 1
+        for _ in range(max(frames - lat_dn, 0)):
+            yield
+            seen += 1 if B.held(S.io(self.row), action) else 0
+            if check:
+                check(self)
+        self.release(action)
+        lat_up = yield from self.await_ack(action, False)
+        self.holds.append({'action': action, 'requested_frames': frames, 'observed_frames': seen + max(lat_up - 1, 0),
+                           'press_latency_frames': lat_dn, 'release_latency_frames': lat_up})
+
+    def settle(self, timeout=600, need_support='any'):
+        """Wait until the spider is supported and at rest (SETTLE_FRAMES frames below MOVE_MAX_PXPS)."""
+        tr = S.SettleTracker()
+
+        def ok(r):
+            tr.update(r)
+            return tr.settled and (need_support is None or S.support(r) is not None)
+        return (yield from self.wait_until(ok, timeout, kind=None))
+
+    # aim feedback sources, tried in order: the player's crosshair target, then the input object's aim point
+    AIM_SOURCES = (('player', 'crosshair_tx', 'crosshair_ty'), ('io', 'aimx', 'aimy'))
+
+    def aim(self, angle_deg, radius_px=160, tol_deg=2.0, max_iter=8):
+        """Closed-loop aim: move the mouse until the game's own aim point (player crosshair_tx/ty, or oIO
+        aimx/aimy if the crosshair does not follow the mouse) lies in direction `angle_deg` (GameMaker degrees,
+        0 = right, 90 = up) from the player's body. The screen->room mapping is measured, never assumed."""
+        w, h = self.driver.client_size()
+        src = [None]
+
+        def read(r):
+            scope, kx, ky = src[0]
+            v = S.pvars(r) if scope == 'player' else S.io(r)
+            cur = (v.get(kx), v.get(ky))
+            ok = all(isinstance(c, (int, float)) and not isinstance(c, bool) for c in cur)
+            return cur if ok else None
+
+        def crosshair():
+            last = None
+            for _ in range(20):
+                yield
+                cur = read(self.row)
+                if cur is None:
+                    raise ScenarioFailure('aim_failed', '%s.%s/%s not readable: no aim feedback' % src[0])
+                if cur == last:
+                    return cur
+                last = cur
+            return last
+
+        def angle_err(c):
+            px, py = S.body(self.row)['pos_px']
+            a = math.degrees(math.atan2(-(c[1] - py), c[0] - px)) % 360
+            return ((a - angle_deg + 540) % 360) - 180, a
+
+        m = [w / 2.0, h / 2.0]
+        step = max(20.0, min(w, h) / 16.0)
+        tried = []
+        for source in self.AIM_SOURCES:
+            src[0] = source
+            if read(self.row) is None:
+                tried.append('%s.%s/%s unreadable' % source)
+                continue
+            self.driver.move_mouse(*m)
+            c0 = yield from crosshair()
+            self.driver.move_mouse(m[0] + step, m[1])
+            c1 = yield from crosshair()
+            self.driver.move_mouse(m[0], m[1] + step)
+            c2 = yield from crosshair()
+            j = ((c1[0] - c0[0]) / step, (c2[0] - c0[0]) / step,
+                 (c1[1] - c0[1]) / step, (c2[1] - c0[1]) / step)        # d(room)/d(mouse), row-major 2x2
+            det = j[0] * j[3] - j[1] * j[2]
+            if abs(det) >= 1e-6:
+                break
+            tried.append('%s.%s/%s does not follow the mouse' % source)
+        else:
+            raise ScenarioFailure('aim_failed', 'no aim feedback follows the mouse: ' + '; '.join(tried))
+        self.driver.move_mouse(*m)
+        c = yield from crosshair()
+        err, a = angle_err(c)
+        for it in range(max_iter):
+            if abs(err) <= tol_deg:
+                break
+            px, py = S.body(self.row)['pos_px']
+            tx = px + radius_px * math.cos(math.radians(angle_deg))
+            ty = py - radius_px * math.sin(math.radians(angle_deg))
+            dx, dy = tx - c[0], ty - c[1]
+            m[0] += (j[3] * dx - j[1] * dy) / det
+            m[1] += (-j[2] * dx + j[0] * dy) / det
+            m = [max(2, min(w - 3, m[0])), max(2, min(h - 3, m[1]))]
+            self.driver.move_mouse(*m)
+            c = yield from crosshair()
+            err, a = angle_err(c)
+        self.log({'event': 'aim', 'target_deg': angle_deg, 'achieved_deg': round(a, 3), 'error_deg': round(err, 3),
+                  'source': '.'.join(src[0]), 'mouse_client': [round(m[0], 1), round(m[1], 1)], 'aim_point': c,
+                  'jacobian': j, 'rejected_sources': tried})
+        if abs(err) > tol_deg:
+            raise ScenarioFailure('aim_failed', 'could not aim at %.0f deg (best %.1f deg; target off-screen?)'
+                                  % (angle_deg, a))
+        self.note('aim', {'target_deg': angle_deg, 'achieved_deg': round(a, 2), 'source': '.'.join(src[0])})
+        return a
+
+
+# ------------------------------------------------------------------------------------------ shared pieces
+def keep_grounded(max_air=20):
+    """check(): fail when the spider leaves solid ground for > max_air consecutive frames while walking."""
+    st = {'air': 0}
+
+    def check(ctx):
+        st['air'] = st['air'] + 1 if S.support(ctx.row) != 'ground' else 0
+        if st['air'] > max_air:
+            raise ScenarioFailure('setup_invalid', 'the spider left solid ground while walking '
+                                  '(needs >= 15 spider-lengths of flat ground to the right)')
+    return check
+
+
+def shoot_grapple(ctx, angle):
+    """Aim, press grapple and keep it held; wait for the shot and the attachment. Returns the anchor."""
+    yield from ctx.aim(angle)
+    ctx.mark()
+    ctx.press('grapple')
+    yield from ctx.await_ack('grapple', True)
+    t0 = ctx.frame
+    yield from ctx.wait_until(lambda r: S.live_shot(r) or S.grapple_attached(r), 10, 'missed_input',
+                              'grapple acknowledged by oIO but no web shot appeared')
+    shot_seen = S.live_shot(ctx.row)
+    yield from ctx.wait_until(lambda r: not S.live_shot(r), 60, 'timeout', 'web shot still flying')
+    yield from ctx.wait_until(S.grapple_attached, 6, 'setup_invalid',
+                              'the web shot ended without attaching: no surface within reach at %.0f deg' % angle)
+    a = S.anchor(ctx.row)
+    ctx.note('attach', {'angle_deg': angle, 'frames_press_to_attach': ctx.frame - t0, 'shot_seen': shot_seen,
+                        'anchor': a, 'player_vars': {k: S.pvars(ctx.row).get(k) for k in ('attached', 'grapple')}})
+    return a
+
+
+def release_grapple(ctx):
+    """Release the grapple input and confirm the player detaches; tries one tap if it stays attached
+    (records which behaviour the game showed: release-on-button-up or toggle)."""
+    ctx.mark()
+    t0 = ctx.frame
+    ctx.release('grapple')
+    yield from ctx.await_ack('grapple', False)
+    n = yield from ctx.wait_until(lambda r: not S.grapple_engaged(r), 10, kind=None)
+    if n is None:
+        ctx.note('release', {'mode': 'stayed attached after button-up; tapping once'})
+        ctx.press('grapple')
+        yield from ctx.await_ack('grapple', True)
+        ctx.release('grapple')
+        yield from ctx.await_ack('grapple', False)
+        yield from ctx.wait_until(lambda r: not S.grapple_engaged(r), 10, 'release_failed',
+                                  'the player stayed on the grapple after releasing and tapping the button')
+        ctx.note('release', {'mode': 'toggle', 'frames': ctx.frame - t0})
+    else:
+        ctx.note('release', {'mode': 'button-up', 'frames_to_detach': ctx.frame - t0})
+
+
+def land(ctx, timeout=600):
+    n = yield from ctx.wait_until(lambda r: S.support(r) is not None, timeout, 'timeout',
+                                  'the spider did not land after release')
+    ctx.note('land', {'frames_after_release': n})
+    s = yield from ctx.settle(300)
+    if s is None:
+        ctx.note('land', {'settled': False})
+
+
+def weave_line(ctx, angle):
+    """Aim, hold weave until the shot finishes, release; expect at least one new permanent web (oWeb).
+    The weave control sequence is INFERRED (io.weave / weave_pressed exist; the gesture is not recovered)."""
+    yield from ctx.aim(angle)
+    ctx.mark()
+    webs0 = ctx.new_webs
+    t0 = ctx.frame
+    ctx.press('weave')
+    yield from ctx.await_ack('weave', True)
+    yield from ctx.wait_until(lambda r: S.live_shot(r) or ctx.new_webs > webs0, 10, kind=None)
+    yield from ctx.wait_until(lambda r: not S.live_shot(r), 60, 'timeout', 'weave shot still flying')
+    yield from ctx.wait(10)
+    ctx.release('weave')
+    yield from ctx.await_ack('weave', False)
+    yield from ctx.wait_until(lambda r: ctx.new_webs > webs0, 30, 'no_web_created',
+                              'weave produced no new oWeb (control sequence inferred; surface out of reach?)')
+    ctx.note('weave', {'angle_deg': angle, 'new_webs': ctx.new_webs - webs0, 'frames': ctx.frame - t0})
+
+
+# ------------------------------------------------------------------------------------------ scenarios
+def m2_walk_flat(ctx):
+    """Procedure M2: hold right 4 s, release 2 s (marker), hold left 4 s, release 2 s."""
+    yield from ctx.wait(LEAD_IN_FRAMES)
+    for action in ('right', 'left'):
+        ctx.mark()
+        yield from ctx.hold(action, 240, check=keep_grounded())
+        yield from ctx.wait(120, check=keep_grounded())
+
+
+def w1_attach_hang(ctx):
+    """Procedure W1: shoot straight up, hang hands-off 8 s, release, fall to the ground."""
+    ctx.track_transitions = True
+    yield from ctx.wait(LEAD_IN_FRAMES)
+    yield from shoot_grapple(ctx, 90)
+    yield from ctx.wait(480)
+    yield from release_grapple(ctx)
+    yield from land(ctx)
+
+
+def w2_swing(ctx, angles=(45, 135)):
+    """Procedure W2: attach at 45 deg ahead, swing hands-off 8 s, release; repeat on the other side."""
+    ctx.track_transitions = True
+    yield from ctx.wait(LEAD_IN_FRAMES)
+    for a in angles:
+        yield from shoot_grapple(ctx, a)
+        yield from ctx.wait(480)
+        yield from release_grapple(ctx)
+        yield from land(ctx)
+
+
+def w3_cut_mid_swing(ctx, repeats=3, angle=45):
+    """Procedure W3: attach diagonally, swing 3 s, release at the bottom of the swing (player passes under the
+    anchor), land. Repeated."""
+    ctx.track_transitions = True
+    yield from ctx.wait(LEAD_IN_FRAMES)
+    for i in range(repeats):
+        a = yield from shoot_grapple(ctx, angle if i % 2 == 0 else 180 - angle)
+        yield from ctx.wait(180)
+        if a is not None:
+            side = [None]
+
+            def crossed(r):
+                b = S.body(r)
+                s = math.copysign(1, b['pos_px'][0] - a[0]) if b else 0
+                if side[0] is None:
+                    side[0] = s
+                return s != side[0]
+            n = yield from ctx.wait_until(crossed, 300, kind=None)
+            ctx.note('bottom_of_swing', {'found': n is not None, 'frames_waited': n,
+                                         'vel_pxps': S.body(ctx.row)['vel_pxps'] if S.body(ctx.row) else None})
+        yield from release_grapple(ctx)
+        yield from land(ctx)
+
+
+def w4_pull(ctx, angle=20):
+    """Procedure W4: attach to a surface ~6 lengths away, hold retract 3 s (marker), release, wait 2 s."""
+    ctx.track_transitions = True
+    yield from ctx.wait(LEAD_IN_FRAMES)
+    yield from shoot_grapple(ctx, angle)
+    ctx.mark()
+    yield from ctx.hold('retract', 180)
+    yield from ctx.wait(120)
+    yield from release_grapple(ctx)
+    yield from land(ctx)
+
+
+def w5_weave_line(ctx, angle=20):
+    """Permanent web: weave one line, observe it hands-off 5 s (tension / slack), then walk away from it for
+    2 s to load it, release, wait 2 s."""
+    ctx.track_transitions = True
+    yield from ctx.wait(LEAD_IN_FRAMES)
+    yield from weave_line(ctx, angle)
+    yield from ctx.wait(300)
+    ctx.mark()
+    yield from ctx.hold('left', 120)
+    yield from ctx.wait(120)
+
+
+def w5_weave_snap(ctx, angle=20, jerks=6):
+    """Permanent web: weave a line, then jerk it (direction reversals and jumps) to provoke the length-reversal
+    snap rule. Snaps are observed (new oWeb from snap_web), not required."""
+    ctx.track_transitions = True
+    yield from ctx.wait(LEAD_IN_FRAMES)
+    yield from weave_line(ctx, angle)
+    webs_after_line = ctx.new_webs
+    yield from ctx.wait(60)
+    for i in range(jerks):
+        ctx.mark()
+        yield from ctx.hold('left' if i % 2 == 0 else 'right', 12)
+        yield from ctx.hold('jump', 4)
+        yield from ctx.wait(40)
+    yield from ctx.wait(120)
+    ctx.note('snap', {'new_webs_after_line': ctx.new_webs - webs_after_line,
+                      'interpretation': 'snap_web creates a new oWeb; re-anchoring can too (see transitions)'})
+
+
+class Scenario:
+    def __init__(self, sid, suite, fn, setup, support='ground', max_frames=6000, needs=()):
+        self.id, self.suite, self.fn, self.setup = sid, suite, fn, setup
+        self.support, self.max_frames, self.needs = support, max_frames, tuple(needs)
+
+
+SCENARIOS = {s.id: s for s in [
+    Scenario('M2_walk_flat', 'M2', m2_walk_flat,
+             'Flat solid ground with >= 15 spider-lengths of clear space to the RIGHT.',
+             needs=('right', 'left'), max_frames=1200),
+    Scenario('W1_attach_hang', 'W1', w1_attach_hang,
+             'Solid ground under a ceiling or branch about 4-8 spider-lengths straight ABOVE.',
+             needs=('grapple',), max_frames=2400),
+    Scenario('W2_swing', 'W2', w2_swing,
+             'Solid ground with a ceiling reachable at 45 deg up-right AND 45 deg up-left (open space below).',
+             needs=('grapple',), max_frames=4800),
+    Scenario('W3_cut_mid_swing', 'W2', w3_cut_mid_swing,
+             'Same spot as W2_swing.', needs=('grapple',), max_frames=6000),
+    Scenario('W4_pull', 'W2', w4_pull,
+             'Solid ground with a wall/surface about 6 spider-lengths away at ~20 deg up-right.',
+             needs=('grapple', 'retract'), max_frames=2400),
+    Scenario('W5_weave_line', 'W3', w5_weave_line,
+             'Solid ground with a wall/surface about 4-8 spider-lengths away at ~20 deg up-right, open space to the left.',
+             needs=('weave', 'left'), max_frames=2400),
+    Scenario('W5_weave_snap', 'W3', w5_weave_snap,
+             'Same spot as W5_weave_line.', needs=('weave', 'left', 'right', 'jump'), max_frames=3000),
+]}
+
+SUITES = {
+    'M2': ['M2_walk_flat'],                                   # walking acceleration, stopping, max speed
+    'W1': ['W1_attach_hang'],                                 # grapple projectile, attachment, hang, release
+    'W2': ['W2_swing', 'W3_cut_mid_swing', 'W4_pull'],        # grapple tension, swinging, release, retract
+    'W3': ['W5_weave_line', 'W5_weave_snap'],                 # permanent webs: creation, pulling, snapping
+}
+SUITE_ORDER = ['M2', 'W1', 'W2', 'W3']
