@@ -32,58 +32,99 @@ Hotkeys while recording (the game still receives the keys):
 | **Ctrl+F12** | finish, save and exit the probe |
 
 ## Automated recording (recommended)
-The automated runner plays the scenarios itself with ordinary keyboard and mouse input. It uses the read-only
-probe above to watch the game every frame. **Status: tested only against a mock game in the cloud; the first
-live run on your PC is the real test.** Report anything odd.
+The automated runner plays the scenarios itself with ordinary keyboard and mouse input, and watches the game
+every frame through the read-only probe above.
 
-**One-time:**
-1. `powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -SelfTest`
-   This doesn't need the game. It must end with `SELF-TEST OK`.
-2. Start Webbed, enter a level, and stand on solid ground. Then run:
-   `powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -Check`
-   This sends no input. It must say `readiness: READY`.
-3. `powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -Calibrate`
-   The spider moves, jumps and shoots a web or two while the runner finds which key does what. Keys are
-   confirmed through the game's own input object. The result is saved to
-   `DesktopPlaygroundLocal\auto_bindings.local.json`. A line saying `no reaction in oIO` for every candidate
-   of an action means that action needs a key added to `tools\reference\auto_bindings.json`.
+**Status (live):**
+- Calibration works against the real game: D, A, SPACE, RMB (weave) and LMB (grapple) are confirmed.
+- Retract is unresolved (see "Retract / pull" below).
+- No gameplay scenario has been recorded live yet. Calibration validates no physics.
 
-**Each session:**
-`powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -All`
-(or `-Suite M2,W1`, or `-Scenario W1_attach_hang`)
+All commands run from the `desktop-playground` folder. They are written in short form below; the full form
+is `powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 <options>`.
 
+**Step by step (recommended order; each step is separate):**
+1. `-SelfTest`: no game needed. It must end with `SELF-TEST OK`.
+2. `-Check`: in a level, standing on solid ground. It sends no input and must say `readiness: READY`.
+3. `-List`: shows the suites, the keys each needs, and the spot each needs.
+4. `-Suite M2`: walking only; one scenario.
+5. `-Suite W1`: grapple shot, attach, hang, release; one scenario.
+6. `-Suite W2`: swing both sides, then release at the bottom of the swing; two scenarios at the same spot.
+7. `-Scenario W4_retract_probe`: the retract/pull experiment, described below.
+8. Later: `-Suite W3` (permanent webs). `-All` runs everything in the order M2, W1, W2, W4, W3.
+
+Your confirmed key bindings live in `DesktopPlaygroundLocal\auto_bindings.local.json`:
+- They are reused automatically, so there's no need to calibrate again.
+- `-CalibrateActions retract` re-tests only the actions you name and keeps every other confirmed key.
+- Every save first backs up the previous file as `auto_bindings.local.<time>.bak.json`.
+
+**During a run:**
 - Before each suite the console describes the spot it needs. Walk the spider there in the game, switch back
-  to the console and press Enter. The runner then focuses the game window itself. Answer `s` to skip a suite,
-  or `q` to quit.
+  to the console and press Enter (`s` skips the suite, `q` quits).
+- The runner then brings the game to the front itself. If Windows refuses, it asks you to click the game's
+  **title bar**. Don't click inside the game: that would shoot a web.
 - Then **don't touch the mouse or keyboard** until the console says the suite is done.
-- **Emergency stop: F12 or Pause/Break.** Alt-Tabbing away or moving the mouse also stops the run.
-  Every held key and button is released on any stop.
+- **Emergency stop: F12 or Pause/Break**. This works even while the runner is waiting for the game window.
+  Alt-Tabbing away or moving the mouse during a scenario also stops the run.
+- Every held key and button is released on any stop. The runner restores focus only between suites, never
+  silently in the middle of a scenario.
+
+**Readiness:** before a run and before each scenario, the spider must be in a level, controllable, and
+**at rest**: |v| < 1 px/s for 30 consecutive frames. The runner waits up to 20 s.
+- If the spider doesn't settle, the run **stops** with the measured speed, for example
+  `longest still run 12 frames; |v| ... 1.4..2.3 px/s (support=web)`. It never continues after a failed check.
+- Moving platforms, webs and slopes can keep the body moving; stand on solid, level ground.
 
 | Suite | What it does (scenario IDs) | Spot needed |
 |---|---|---|
 | **M2** | walk right 4 s, stop 2 s, walk left 4 s, stop 2 s (`M2_walk_flat`) | flat solid ground, ≥ 15 spider-lengths clear to the right |
 | **W1** | aims straight up, shoots, hangs 8 s, releases, lands (`W1_attach_hang`) | ceiling/branch 4–8 spider-lengths straight above |
-| **W2** | swings at 45° right and left (`W2_swing`); releases at the bottom of the swing, 3× (`W3_cut_mid_swing`); attaches at ~20° and holds retract 3 s (`W4_pull`) | ceiling reachable at 45° both sides, open space below; then a wall ~6 lengths away at ~20° |
+| **W2** | swings at 45° right and left (`W2_swing`); releases at the bottom of the swing, 3× (`W3_cut_mid_swing`) | ceiling reachable at 45° on both sides, open space below |
+| **W4** | retract/pull experiment (`W4_retract_probe`); then `W4_pull`, which is **skipped** until a retract key is confirmed | ceiling 6–10 lengths away at ~60° up-right; for `W4_pull`, a wall ~6 lengths away at ~20° |
 | **W3** | weaves a permanent web, watches it, loads it (`W5_weave_line`); weaves and jerks it to provoke a snap (`W5_weave_snap`) | a wall 4–8 lengths away at ~20° up-right, open space to the left |
 
+**Retract / pull (open question).** Live calibration found no key that changes `oIO.retract`. There are two
+likely reasons, neither confirmed yet:
+- `oIO` may not have a `retract` variable at all. The probe reports only variables that exist on the instance.
+  Calibration now says this explicitly: "oIO has no variable retract".
+- In the recovered grapple code, the pull strength (oPlayer_Step_0 L661–L677) branches on **weave**. So pulling
+  may be grapple + RMB, not a separate button. The player variable `retract` is reset when a shot is fired.
+
+`W4_retract_probe` measures it:
+1. It attaches a grapple and keeps LMB held.
+2. It presses each key from `auto_bindings.json` → `retract_probe` (RMB, W, S, UP, DOWN, SHIFT, CTRL, E, Q, R,
+   F, MMB) for 1 s each.
+3. It records which `oIO` and player variables change, and whether the rope distance starts shrinking or growing
+   compared with grapple-only.
+
+This also answers whether the control needs an active grapple. Send the report: the `retract_probe` block lists
+each key's effect. It's an experiment. A key that shortens the rope is only a *candidate* until the decoded
+code agrees.
+
 For each scenario the runner:
-1. waits until the spider is controllable and at rest;
+1. waits until the spider is ready;
 2. records automatically (same files as `record.ps1`, in `DesktopPlaygroundLocal\captures\`);
 3. checks that every input reached the game, that the expected things happened (shot, attachment, release,
    landing, new web), that frames are consistent (no respawn, no room change), and that the capture passes the
    quality gate.
 
 It retries transient failures once. Failed recordings are **kept** in `DesktopPlaygroundLocal\captures_failed\`
-together with `auto_run.json`, which explains why they failed. They are kept out of `captures\` so they don't
-break the test run.
+with `auto_run.json` explaining why, out of `captures\` so they don't break the tests. Existing captures,
+including the M3 baseline, are never modified.
 
 At the end it runs the full test suite and writes `DesktopPlaygroundLocal\auto_runs\<time>\report.md`, which
 contains:
-- per scenario: pass or fail, the reason, measured input latency (frames), and observations (walk plateau and
-  stop times, attach and release frames, the release mode, aim accuracy);
-- the relevant test results.
+- calibration results, if any;
+- per scenario: the result, the measured input latency (frames), and observations (walk plateau and stop
+  times, attach and release frames, the release mode, aim accuracy, the retract-probe table);
+- the relevant tests.
 
-Send me that report. Exit codes: 0 all good, 1 failures (see the report), 2 not ready / not started, 3 aborted.
+The verdict line never says "passed" when nothing was recorded. Exit codes:
+- 0: every scenario that ran passed, and the tests are clean;
+- 1: failures;
+- 2: not ready / not started;
+- 3: aborted;
+- 4: nothing recorded (calibration only, or everything skipped).
 
 The runner sends inputs through Windows exactly like a real keyboard and mouse. It never writes to the game's
 memory. Timing is measured from what the game itself saw, and is reported, not assumed.

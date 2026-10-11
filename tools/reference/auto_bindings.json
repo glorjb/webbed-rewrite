@@ -1,11 +1,50 @@
 {
  "note": "Candidate keys per action, tried in order by calibration (auto_record.ps1 -Calibrate). Webbed's default bindings were NOT recovered from the binary; these are guesses that calibration confirms against the game's own input object (oIO). The confirmed result is saved to DesktopPlaygroundLocal\\auto_bindings.local.json, outside the repository.",
  "candidates": {
-  "right": ["D", "RIGHT"],
-  "left": ["A", "LEFT"],
-  "jump": ["SPACE", "W", "UP"],
-  "grapple": ["LMB", "RMB"],
-  "weave": ["RMB", "LMB", "E", "Q"],
-  "retract": ["SHIFT", "S", "CTRL", "DOWN", "MMB"]
- }
+  "right": [
+   "D",
+   "RIGHT"
+  ],
+  "left": [
+   "A",
+   "LEFT"
+  ],
+  "jump": [
+   "SPACE",
+   "W",
+   "UP"
+  ],
+  "grapple": [
+   "LMB",
+   "RMB"
+  ],
+  "weave": [
+   "RMB",
+   "LMB",
+   "E",
+   "Q"
+  ],
+  "retract": [
+   "SHIFT",
+   "S",
+   "CTRL",
+   "DOWN",
+   "MMB"
+  ]
+ },
+ "retract_probe": [
+  "RMB",
+  "W",
+  "S",
+  "UP",
+  "DOWN",
+  "SHIFT",
+  "CTRL",
+  "E",
+  "Q",
+  "R",
+  "F",
+  "MMB"
+ ],
+ "retract_probe_note": "Tried one at a time by W4_retract_probe WHILE a grapple is attached and held; for each key the probe records which oIO / player variables change and whether the rope distance trend changes. Keys already bound to grapple, jump or walking are skipped."
 }

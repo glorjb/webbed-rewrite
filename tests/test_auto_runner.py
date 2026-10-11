@@ -23,6 +23,7 @@ from autoref.capture import SessionWriter                       # noqa: E402
 from autoref.driver import AbortRun, Watchdog                   # noqa: E402
 from autoref.mock import MockGame, MockInputDriver              # noqa: E402
 from autoref.provider import GameLost                           # noqa: E402
+from autoref import runner as RN                                # noqa: E402
 from autoref.runner import Config, ConsoleUI, Runner            # noqa: E402
 
 
@@ -160,10 +161,28 @@ class MockRun(unittest.TestCase):
         res = self.run_ids(r, ['M2_walk_flat'])[0]
         self.assertPreservedFailure(r, res, 'setup_invalid')
 
-    def test_missing_binding(self):
-        g, d, r = self.make(keys={'right': 'D', 'left': 'A'})
-        res = self.run_ids(r, ['W1_attach_hang'])[0]
-        self.assertEqual(res['failure']['kind'], 'binding_missing')
+    def test_unresolved_binding_is_skipped_and_records_nothing(self):
+        g, d, r = self.make(keys={'right': 'D', 'left': 'A', 'grapple': 'LMB'})
+        res = self.run_ids(r, ['W4_pull'])
+        self.assertEqual([x['status'] for x in res], ['skipped'])          # no retry, not a failure
+        self.assertEqual(res[0]['failure']['kind'], 'binding_unresolved')
+        self.assertIn('retract', res[0]['failure']['msg'])
+        self.assertEqual(self.sessions(self.root) + self.sessions(r.cfg.failed_root), [])
+        self.assertEqual(RN.run_outcome(res, None, {}), (4, []))           # nothing recorded != all passed
+
+    def test_retract_probe_identifies_the_key_that_changes_the_rope(self):
+        g, d, r = self.make(io_absent=('retract',), weave_reels_in=True)
+        res = self.run_ids(r, ['W4_retract_probe'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        trials = {t['key']: t for t in res['observations']['retract_probe'][0]['trials']}
+        self.assertNotIn('LMB', trials)                                   # grapple key itself is never probed
+        self.assertNotIn('SPACE', trials)
+        self.assertLess(trials['RMB']['d_slope_minus_baseline'], -1.0)    # reels in
+        self.assertIn('weave', trials['RMB']['oio_changed'])
+        for k in ('SHIFT', 'S', 'CTRL'):
+            self.assertEqual(trials[k]['oio_changed'], {})
+            self.assertAlmostEqual(trials[k]['d_slope_minus_baseline'], 0.0, delta=0.2)
+        self.assertEqual(d.held, set())
 
     def test_toggle_release_is_detected_and_recorded(self):
         g, d, r = self.make(release_mode='toggle')
@@ -209,6 +228,24 @@ class MockRun(unittest.TestCase):
         self.assertEqual(d.held, set())
 
     # ------------------------------------------------------------------ safety
+    def test_focus_restore_failure_after_prompt_aborts_safely(self):
+        g, d, r = self.make()
+        d.refocus_ok = False
+        d.focus_lost_at = 0
+        r.ui.ask = lambda msg: ''
+        with self.assertRaises(AbortRun) as cm:
+            self.run_ids(r, ['M2_walk_flat'])
+        self.assertIn('TITLE BAR', str(cm.exception))
+        self.assertEqual(d.held, set())
+        self.assertEqual(self.sessions(self.root), [])
+
+    def test_emergency_stop_while_waiting_for_focus(self):
+        g, d, r = self.make()
+        d.emergency_at = 0
+        with self.assertRaises(AbortRun) as cm:
+            r.focus()
+        self.assertIn('EMERGENCY', str(cm.exception))
+
     def test_observe_only_mode_does_not_require_focus(self):
         g, d, r = self.make()
         d.focus_lost_at = 0
@@ -280,6 +317,52 @@ class MockRun(unittest.TestCase):
         b = r.calibrate(B.load_defaults())
         self.assertIsNone(b.keys['retract'])
         self.assertEqual(b.keys['right'], 'D')
+        self.assertIn('exist but no candidate', r.calibration['actions']['retract']['reason'])
+
+    def test_calibration_explains_a_missing_oio_variable(self):
+        g, d, r = self.make(keys={}, io_absent=('retract',))
+        b = r.calibrate(B.load_defaults())
+        a = r.calibration['actions']
+        self.assertEqual(a['retract']['status'], 'unresolved')
+        self.assertIn('oIO has no variable retract', a['retract']['reason'])
+        self.assertEqual(a['retract']['tried'], ['SHIFT', 'S', 'CTRL', 'DOWN', 'MMB'])
+        self.assertIn('retract', r.calibration['oio_variables_missing'])
+        self.assertEqual({k: v for k, v in b.keys.items() if v},
+                         {'right': 'D', 'left': 'A', 'jump': 'SPACE', 'weave': 'RMB', 'grapple': 'LMB'})
+        self.assertIn('1 unresolved (retract)', RN.verdict([], {'calibration': r.calibration}))
+        self.assertIn('NO gameplay scenarios', RN.verdict([], {'calibration': r.calibration}))
+
+    def test_partial_recalibration_keeps_confirmed_keys(self):
+        base = B.Bindings({'right': 'D', 'left': 'A', 'jump': 'SPACE', 'grapple': 'LMB', 'weave': 'RMB',
+                           'retract': None}, calibrated={'right': {'key': 'D', 'latency_frames': 1}})
+        g, d, r = self.make(keys={})
+        g.keys = {'right': 'RIGHT', 'retract': 'CTRL'}          # only retract responds to a candidate now
+        b = r.calibrate(B.load_defaults(), actions=['retract'], base=base)
+        self.assertEqual(b.keys, {'right': 'D', 'left': 'A', 'jump': 'SPACE', 'grapple': 'LMB', 'weave': 'RMB',
+                                  'retract': 'CTRL'})
+        self.assertEqual(b.calibrated['right'], {'key': 'D', 'latency_frames': 1})
+        self.assertEqual(r.calibration['actions']['right']['status'], 'kept')
+        self.assertEqual(d.held, set())
+
+    def test_bindings_save_backs_up_previous_file(self):
+        path = os.path.join(self.tmp, 'auto_bindings.local.json')
+        self.assertIsNone(B.Bindings({'right': 'D'}).save(path))
+        backup = B.Bindings({'right': 'RIGHT'}).save(path)
+        with open(backup) as f:
+            self.assertEqual(json.load(f)['keys'], {'right': 'D'})
+        self.assertEqual(B.Bindings.load(path).keys, {'right': 'RIGHT'})
+
+    # ------------------------------------------------------------------ readiness gate
+    def test_readiness_gate_never_continues_and_reports_measured_speed(self):
+        g, d, r = self.make(jitter_pxps=3.0)          # body never below 1 px/s
+        with self.assertRaises(SC.ScenarioFailure) as cm:
+            r.ensure_ready('any', 'run start', timeout=120)
+        self.assertEqual(cm.exception.kind, 'not_ready')
+        self.assertIn('did not come to rest', cm.exception.msg)
+        self.assertIn('3.00..3.00 px/s', cm.exception.msg)
+        with self.assertRaises(SC.ScenarioFailure):
+            r.calibrate(B.load_defaults())             # calibration is gated by the same check
+        self.assertEqual(d.held, set())
 
 
 class TestPipeline(unittest.TestCase):

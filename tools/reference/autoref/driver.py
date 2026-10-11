@@ -204,18 +204,50 @@ class WinInputDriver(InputDriver):
     def foreground_ok(self):
         return self.u32.GetForegroundWindow() == self.hwnd
 
+    FOCUS_STABLE_S = 0.3
+
     def focus_game(self, timeout_s=15.0):
-        """Try to bring the game to the foreground; otherwise wait for the user to click it."""
-        self.u32.SetForegroundWindow(self.hwnd)
+        """Bring the game to the foreground WITHOUT injecting any input into another window.
+        1. restore it if minimised; 2. SetForegroundWindow; 3. if Windows' foreground lock refuses, attach this
+        thread's input queue to the current foreground thread (AttachThreadInput), retry, detach; 4. otherwise ask
+        the user to click the game's TITLE BAR (a click inside the game would shoot a web).
+        Nothing may be held (runner releases first); the emergency stop is polled throughout and aborts; the
+        game must then stay in the foreground for FOCUS_STABLE_S before the runner may send anything."""
+        u32, k32 = self.u32, self.ct.WinDLL('kernel32')
+        if self.held:
+            self.release_all()
+        if u32.IsIconic(self.hwnd):
+            u32.ShowWindow(self.hwnd, 9)                       # SW_RESTORE
+        if not self.foreground_ok():
+            u32.SetForegroundWindow(self.hwnd)
+        if not self.foreground_ok():
+            fg = u32.GetForegroundWindow()
+            fg_tid = u32.GetWindowThreadProcessId(fg, None) if fg else 0
+            me = k32.GetCurrentThreadId()
+            attached = bool(fg_tid and fg_tid != me and u32.AttachThreadInput(me, fg_tid, True))
+            try:
+                u32.BringWindowToTop(self.hwnd)
+                u32.SetForegroundWindow(self.hwnd)
+            finally:
+                if attached:
+                    u32.AttachThreadInput(me, fg_tid, False)
         t_end = time.monotonic() + timeout_s
-        asked = False
+        asked, stable_since = False, None
         while time.monotonic() < t_end:
+            if self.emergency_pressed():
+                raise AbortRun('EMERGENCY STOP (F12 / Pause pressed) while waiting for the game window')
             if self.foreground_ok():
-                return True
-            if not asked:
-                print('  Click once inside the Webbed window to give it focus (waiting %d s)...' % timeout_s)
-                asked = True
-            time.sleep(0.05)
+                stable_since = stable_since or time.monotonic()
+                if time.monotonic() - stable_since >= self.FOCUS_STABLE_S:
+                    self.mouse = None                          # takeover baseline restarts after a focus change
+                    return True
+            else:
+                stable_since = None
+                if not asked:
+                    print('  Click the Webbed window\'s TITLE BAR to give it focus (not inside the game: that would '
+                          'shoot a web). Waiting %d s; F12 / Pause aborts.' % timeout_s)
+                    asked = True
+            time.sleep(0.02)
         return False
 
     # ---- safety

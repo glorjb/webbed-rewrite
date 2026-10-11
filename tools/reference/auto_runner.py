@@ -5,6 +5,8 @@
     python tools/reference/auto_runner.py --scenario W1_attach_hang
     python tools/reference/auto_runner.py --check                   # attach + readiness + bindings, no inputs
     python tools/reference/auto_runner.py --calibrate               # find the key for each action via oIO
+    python tools/reference/auto_runner.py --calibrate retract       # only those actions; others are kept
+    python tools/reference/auto_runner.py --list                    # suites, scenarios and the spot each needs
     python tools/reference/auto_runner.py --mock --all              # runner self-test against a FAKE game
 
 Launcher: powershell -ExecutionPolicy Bypass -File tools\\reference\\auto_record.ps1 -All
@@ -35,7 +37,11 @@ def parse(argv=None):
     ap.add_argument('--suite', nargs='+', choices=SUITE_ORDER, default=[])
     ap.add_argument('--scenario', nargs='+', choices=sorted(SCENARIOS), default=[])
     ap.add_argument('--check', action='store_true', help='attach, report readiness and bindings, send no input')
-    ap.add_argument('--calibrate', action='store_true', help='(re)calibrate bindings against oIO')
+    ap.add_argument('--calibrate', nargs='*', choices=list(RN.Runner.CAL_ORDER), default=None, metavar='ACTION',
+                    help='(re)calibrate bindings against oIO: all actions, or only the ones named (%s); confirmed '
+                         'keys of other actions are kept and the previous file is backed up'
+                         % ', '.join(RN.Runner.CAL_ORDER))
+    ap.add_argument('--list', action='store_true', help='list suites and scenarios, then exit')
     ap.add_argument('--no-calibrate', action='store_true', help='never calibrate automatically')
     ap.add_argument('--capture-root', default=None)
     ap.add_argument('--retries', type=int, default=1, help='extra attempts for transient failures (default 1)')
@@ -50,7 +56,7 @@ def parse(argv=None):
 
 
 GAME_FAULTS = {'drop_keys', 'release_mode', 'io_latency', 'torn_every', 'skip_every', 'no_player_frames',
-               'freeze_at', 'respawn_at'}
+               'freeze_at', 'respawn_at', 'io_absent', 'weave_reels_in', 'jitter_pxps'}
 DRIVER_FAULTS = {'emergency_at', 'focus_lost_at'}
 
 
@@ -59,8 +65,10 @@ def mock_kwargs(faults):
     game, drv = {}, {}
     for f in faults:
         k, _, v = f.partition('=')
-        if k == 'drop_keys':
+        if k in ('drop_keys', 'io_absent'):
             game[k] = tuple(v.split(','))
+        elif k == 'jitter_pxps':
+            game[k] = float(v)
         elif k == 'release_mode':
             game[k] = v
         elif k in GAME_FAULTS:
@@ -72,13 +80,25 @@ def mock_kwargs(faults):
     return game, drv
 
 
+def list_scenarios():
+    for suite in SUITE_ORDER:
+        print('suite %s' % suite)
+        for sid in SUITES[suite]:
+            sc = SCENARIOS[sid]
+            print('  %-18s needs keys: %-28s spot: %s' % (sid, ', '.join(sc.needs), sc.setup))
+
+
 def main(argv=None):
     a = parse(argv)
+    if a.list:
+        list_scenarios()
+        return 0
+    calibrating = a.calibrate is not None
     suites = SUITE_ORDER if a.all else list(a.suite)
     only = set(a.scenario) or None
     if only:
         suites = suites or [s for s in SUITE_ORDER if any(i in only for i in SUITES[s])]
-    if not (suites or a.check or a.calibrate):
+    if not (suites or a.check or calibrating):
         print('nothing to do: pass --all, --suite, --scenario, --check or --calibrate')
         return 2
     if a.mock:
@@ -91,7 +111,9 @@ def main(argv=None):
         root = a.capture_root or DEFAULT_ROOT
     os.makedirs(root, exist_ok=True)
     # mock sessions are fake: never run the physics regression suite against them
-    cfg = RN.Config(root, retries=a.retries, prompt=not a.no_prompt and not a.mock, run_tests=not (a.no_tests or a.mock),
+    # and calibration / check alone records nothing, so there is nothing new for the tests to judge
+    cfg = RN.Config(root, retries=a.retries, prompt=not a.no_prompt and not a.mock,
+                    run_tests=bool(suites) and not (a.no_tests or a.mock),
                     mouse_failsafe=not a.no_mouse_failsafe, mode='mock' if a.mock else 'live')
     run_info = {'stamp': RN.stamp(), 'mode': cfg.mode, 'started': datetime.datetime.now().isoformat(),
                 'argv': sys.argv[1:] if argv is None else argv}
@@ -119,8 +141,8 @@ def main(argv=None):
             watchdog = Watchdog(driver).start()
         if a.mock:
             bnd = B.Bindings(provider.keys, source='mock')
-        elif os.path.exists(cfg.bindings_file) and not a.calibrate:
-            bnd = B.Bindings.load(cfg.bindings_file)
+        elif os.path.exists(cfg.bindings_file):
+            bnd = B.Bindings.load(cfg.bindings_file)            # confirmed keys are kept unless recalibrated
         else:
             bnd = B.Bindings.first_candidates(B.load_defaults())
         runner = RN.Runner(provider, driver, bnd, cfg, watchdog=watchdog)
@@ -128,22 +150,29 @@ def main(argv=None):
         print('Attaching (read-only)...')
         run_info['init'] = runner.initialise(focus=not a.check)['report']
         run_info['bindings_source'] = bnd.source
-        reasons = runner.wait_ready('any', timeout=180)
-        print('readiness: %s' % ('READY' if not reasons else 'NOT READY: ' + '; '.join(reasons)))
         if a.check:
+            reasons = runner.wait_ready('any')
+            print('readiness: %s' % ('READY' if not reasons else 'NOT READY: ' + '; '.join(reasons)))
             print('bindings (%s): %s' % (bnd.source, bnd.keys))
             code = 0 if not reasons else 2
-            cfg.run_tests = False
         else:
-            needs_cal = a.calibrate or (not a.mock and not a.no_calibrate and not os.path.exists(cfg.bindings_file))
+            runner.ensure_ready('any', 'run start')          # gate: a failed check stops here, never continues
+            print('readiness: READY')
+            needs_cal = calibrating or (not a.mock and not a.no_calibrate and not os.path.exists(cfg.bindings_file))
             if needs_cal:
-                bnd = runner.calibrate(B.load_defaults())
-                bnd.save(cfg.bindings_file)
-                print('bindings saved to %s: %s' % (cfg.bindings_file, bnd.keys))
+                bnd = runner.calibrate(B.load_defaults(), actions=a.calibrate or None, base=bnd)
+                runner.b = bnd
+                run_info['calibration'] = runner.calibration
+                if not a.mock:
+                    backup = bnd.save(cfg.bindings_file)
+                    print('bindings saved to %s: %s' % (cfg.bindings_file, bnd.keys))
+                    if backup:
+                        print('previous bindings kept in %s' % backup)
                 missing = [k for k, v in bnd.keys.items() if not v]
                 if missing:
-                    print('WARNING: no working key found for %s; scenarios needing them will fail with binding_missing'
+                    print('NOTE: no confirmed key for %s; scenarios needing them are SKIPPED (nothing recorded)'
                           % missing)
+                print('Calibration only confirms that the game receives the keys; it validates no physics.')
             run_info['bindings'] = bnd.to_json()
             if suites:
                 runner.run_suites(suites, only)
@@ -172,7 +201,7 @@ def main(argv=None):
             provider.close()
     results = runner.results if runner else []
     tests = None
-    if cfg.run_tests and not a.check:
+    if cfg.run_tests:
         print('Running regression tests against %s ...' % cfg.capture_root)
         os.makedirs(cfg.runs_root, exist_ok=True)
         tests = RN.run_tests(cfg.capture_root, os.path.join(cfg.runs_root, 'tests_%s.json' % run_info['stamp']))
@@ -181,8 +210,7 @@ def main(argv=None):
     d, rep = RN.write_report(cfg, run_info, results, tests, suites)
     print('')
     print(rep['verdict'])
-    passed = {r['scenario'] for r in results if r['status'] == 'pass'}
-    unpassed = sorted({r['scenario'] for r in results if r['status'] == 'fail'} - passed)
+    outcome, unpassed = RN.run_outcome(results, tests, run_info)
     if unpassed:
         print('scenarios without a passing attempt: %s' % ', '.join(unpassed))
     if tests and tests.get('counts'):
@@ -190,9 +218,7 @@ def main(argv=None):
             if t['outcome'] in ('fail', 'error'):
                 print('  %s %s' % (t['outcome'].upper(), t['id']))
     print('report: %s' % os.path.join(d, 'report.md'))
-    if code == 0 and (unpassed or (tests and (not tests.get('counts') or tests['counts']['fail'] or tests['counts']['error']))):
-        code = 1
-    return code
+    return code or outcome
 
 
 if __name__ == '__main__':

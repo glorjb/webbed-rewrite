@@ -38,6 +38,7 @@ RELEVANT_TESTS = {
     'W1': ['WebShot', 'test_free_fall_gravity', 'test_every_capture_is_usable'],
     'W2': ['WebShot', 'test_free_fall_gravity', 'WebGeometry', 'test_every_capture_is_usable'],
     'W3': ['WebGeometry', 'test_every_capture_is_usable'],
+    'W4': ['WebShot', 'test_every_capture_is_usable'],
 }
 
 
@@ -82,6 +83,8 @@ class Runner:
         self.results = []
         self.created = set()            # session dirs created by this run (the only ones it may move)
         self.last_row = None
+        self.io_keys_seen = set()       # oIO variables that actually exist (the probe returns only present ones)
+        self.calibration = None         # per-action calibration report (for the run report)
 
     # ---------------------------------------------------------------- frame loop
     def frame(self, writer=None, marker=0):
@@ -91,6 +94,7 @@ class Runner:
             writer.write_row(row, focus)
         self.p.idle(writer)
         self.last_row = row
+        self.io_keys_seen.update(row.get('io') or {})
         return row
 
     def drive(self, gen, ctx, writer=None, max_frames=6000, issues=None):
@@ -111,19 +115,35 @@ class Runner:
             return
 
     def wait_ready(self, need_support, timeout=READY_TIMEOUT_FRAMES):
-        """Wait until controllable and settled. Returns [] when ready, else the last reasons."""
+        """Wait until controllable and settled. Returns [] when ready, else the last reasons (with the measured
+        speed when the only problem is that the spider never stayed at rest long enough)."""
         tr = S.SettleTracker()
         reasons = ['no frame']
+        best, speeds = 0, []
         for _ in range(timeout):
             row = self.frame()
             reasons = S.readiness(row, need_support)
             tr.update(row)
+            best = max(best, tr.frames)
+            if S.body(row):
+                speeds.append(S.speed_pxps(row))
             if not reasons and tr.settled:
                 return []
         if not reasons and not tr.settled:
-            reasons = ['the spider did not come to rest (|v| < %.1f px/s for %d frames)'
-                       % (S.MOVE_MAX_PXPS, S.SETTLE_FRAMES)]
+            recent = speeds[-60:] or [float('nan')]
+            reasons = ['the spider did not come to rest: needs |v| < %.1f px/s for %d consecutive frames; longest '
+                       'still run %d frames; |v| over the last second %.2f..%.2f px/s (support=%s)'
+                       % (S.MOVE_MAX_PXPS, S.SETTLE_FRAMES, best, min(recent), max(recent),
+                          S.support(self.last_row))]
         return reasons
+
+    def ensure_ready(self, need_support, purpose, timeout=READY_TIMEOUT_FRAMES):
+        """Gate: wait until ready or raise ScenarioFailure('not_ready'). Never continues on a failed check."""
+        self.ui.say('  waiting up to %d s for the spider to be controllable and at rest (%s)...'
+                    % (timeout // 60, purpose))
+        reasons = self.wait_ready(need_support, timeout)
+        if reasons:
+            raise ScenarioFailure('not_ready', '%s: %s' % (purpose, '; '.join(reasons)))
 
     # ---------------------------------------------------------------- initialisation
     def initialise(self, focus=True):
@@ -132,20 +152,45 @@ class Runner:
             self.ui.say('  ' + line)
         if not diag['counter_advancing']:
             raise GameLost('the game frame counter is not advancing (game paused by Windows / loading?)')
-        if focus and not self.d.focus_game():
-            raise AbortRun('could not bring the Webbed window to the foreground')
+        self.ui.say('  (attach diagnostics are a snapshot; the runner keeps refreshing the instance list)')
+        if focus:
+            self.focus()
         return diag
 
+    def focus(self):
+        """Bring the game to the foreground at a phase boundary (start, after a prompt). Never mid-scenario:
+        a focus change during a scenario is treated as a user takeover and aborts. Nothing is held while
+        focusing, and the emergency stop is polled throughout (driver.focus_game)."""
+        self.d.release_all()
+        if not self.d.focus_game():
+            raise AbortRun('could not bring the Webbed window to the foreground; click its TITLE BAR (not inside '
+                           'the window, which would fire a web) and run again')
+
     # ---------------------------------------------------------------- calibration
-    def calibrate(self, candidates):
-        """Find, per action, the first candidate key that oIO reacts to. Fires a web or two (grapple/weave)."""
+    CAL_ORDER = ('right', 'left', 'jump', 'retract', 'weave', 'grapple')
+
+    def calibrate(self, candidates, actions=None, base=None):
+        """Find, per action, the first candidate key that oIO reacts to. Fires a web or two (grapple/weave).
+        `actions`: subset to (re)calibrate; others keep their key from `base` (previously confirmed bindings).
+        An action whose oIO variable does not exist is reported as such: no key can be confirmed through it.
+        If the spider will not come to rest between actions, calibration stops and returns what it found."""
         self.ui.say('Calibrating bindings (watch the game: the spider will move, jump and shoot)...')
-        reasons = self.wait_ready('any')
-        if reasons:
-            raise ScenarioFailure('not_ready', '; '.join(reasons))
-        keys, cal, used = {}, {}, set()
-        for action in ('right', 'left', 'jump', 'retract', 'weave', 'grapple'):
-            keys[action] = None
+        base = base or B.Bindings({})
+        actions = [a for a in self.CAL_ORDER if not actions or a in actions]
+        keys = {a: base.key(a) for a in self.CAL_ORDER}
+        cal = dict(base.calibrated)
+        report = {}
+        self.ensure_ready('any', 'calibration start')
+        used = {k.upper() for a, k in keys.items() if k and a not in actions}
+        for i, action in enumerate(actions):
+            if i:
+                reasons = self.wait_ready('any')
+                if reasons:
+                    for rest in actions[i:]:
+                        report[rest] = {'status': 'not attempted', 'reason': 'spider not at rest: ' + '; '.join(reasons)}
+                    self.ui.say('  calibration stopped: the spider did not come to rest (%s)' % '; '.join(reasons))
+                    break
+            found, tried = None, []
             for key in candidates.get(action, []):
                 if key.upper() in used:
                     continue
@@ -153,16 +198,38 @@ class Runner:
                 ctx.row = self.last_row
                 res = {}
                 self.drive(self._try_key(ctx, action, key, res), ctx, max_frames=200)
+                tried.append(key.upper())
                 self.ui.say('  %-8s %-6s %s' % (action, key, 'OK (latency %d frames)' % res['latency']
                                                 if res.get('ok') else 'no reaction in oIO'))
                 if res.get('ok'):
-                    keys[action] = key.upper()
-                    cal[action] = {'key': key.upper(), 'latency_frames': res['latency'], 'side_effects': res['also']}
-                    used.add(key.upper())
+                    found = key.upper()
+                    cal[action] = {'key': found, 'latency_frames': res['latency'], 'side_effects': res['also'],
+                                   'confirmed': stamp()}
+                    used.add(found)
                     break
+            vars_needed = [v for v, _ in B.SIGNALS[action]['any']]
+            present = [v for v in vars_needed if v in self.io_keys_seen]
+            if found:
+                keys[action] = found
+                report[action] = {'status': 'confirmed', 'key': found, 'latency_frames': cal[action]['latency_frames']}
+            else:
+                keys[action] = None
+                cal.pop(action, None)
+                why = ('oIO has no variable %s: no key can be confirmed through it, so this action is probably not '
+                       'an oIO input (see W4_retract_probe)' % '/'.join(vars_needed) if not present else
+                       'oIO variable(s) %s exist but no candidate key changed them' % '/'.join(present))
+                report[action] = {'status': 'unresolved', 'tried': tried, 'reason': why}
+                self.ui.say('  %-8s UNRESOLVED: %s' % (action, why))
             ctx = Ctx(self.d, self.b)
             ctx.row = self.last_row
             self.drive(self._release_webs(ctx), ctx, max_frames=900)
+        for a in self.CAL_ORDER:
+            if a not in actions:
+                report[a] = {'status': 'kept', 'key': keys[a]}
+        missing_io = sorted(v for v in ('hm', 'jmp', 'jmp_held', 'grapple', 'weave', 'retract')
+                            if v not in self.io_keys_seen)
+        self.calibration = {'actions': report, 'oio_variables_seen': sorted(self.io_keys_seen),
+                            'oio_variables_missing': missing_io}
         self.b = B.Bindings(keys, source='calibrated %s' % stamp(), calibrated=cal)
         return self.b
 
@@ -191,7 +258,10 @@ class Runner:
                'started': datetime.datetime.now().isoformat(), 'mode': self.cfg.mode}
         missing = [a for a in sc.needs if not self.b.key(a)]
         if missing:
-            res['failure'] = {'kind': 'binding_missing', 'msg': 'no key bound for %s (run -Calibrate)' % missing}
+            res['status'] = 'skipped'
+            res['failure'] = {'kind': 'binding_unresolved',
+                              'msg': 'no confirmed key for %s; nothing was recorded (see -Calibrate%s)' % (
+                                  missing, ' and W4_retract_probe' if 'retract' in missing else '')}
             return res
         reasons = self.wait_ready(sc.support)
         if reasons:
@@ -305,8 +375,7 @@ class Runner:
                                              'failure': {'kind': 'skipped', 'msg': 'skipped by user'}})
                         continue
                     self.d.mouse = None        # the user moved the mouse during setup: new takeover baseline
-                    if not self.d.focus_game():
-                        raise AbortRun('could not bring the Webbed window to the foreground')
+                    self.focus()
                 last_setup = sc.setup if 'Same spot' not in sc.setup else last_setup
                 for attempt in range(1, self.cfg.retries + 2):
                     self.ui.say('  -> %s attempt %d ...' % (sid, attempt))
@@ -316,7 +385,7 @@ class Runner:
                                                ' [%s] %s' % (res['failure']['kind'], res['failure']['msg'])))
                     if res.get('preserved_at'):
                         self.ui.say('     failed recording preserved: %s' % res['preserved_at'])
-                    if res['status'] == 'pass' or res['failure']['kind'] not in RETRYABLE:
+                    if res['status'] != 'fail' or res['failure']['kind'] not in RETRYABLE:
                         break
         return self.results
 
@@ -386,13 +455,43 @@ def relevant(tests, suites):
     return [t for t in tests if any(k in t['id'] for k in keys)]
 
 
+def verdict(results, run_info):
+    """One honest line: what was recorded, never 'all passed' when nothing ran."""
+    ok = sum(1 for r in results if r['status'] == 'pass')
+    failed = sum(1 for r in results if r['status'] == 'fail')
+    skipped = sum(1 for r in results if r['status'] == 'skipped')
+    parts = []
+    cal = run_info.get('calibration')
+    if cal:
+        acts = cal['actions']
+        parts.append('calibration: %d confirmed/kept, %d unresolved (%s)' % (
+            sum(1 for a in acts.values() if a['status'] in ('confirmed', 'kept') and a.get('key')),
+            sum(1 for a in acts.values() if a['status'] in ('unresolved', 'not attempted') or not a.get('key')),
+            ', '.join(sorted(k for k, a in acts.items() if not a.get('key'))) or 'none'))
+    if not results:
+        parts.append('NO gameplay scenarios were run or recorded')
+    elif ok == 0 and failed == 0:
+        parts.append('NO gameplay scenarios were recorded (%d skipped)' % skipped)
+    else:
+        parts.append('%d scenario attempt(s): %d pass, %d fail, %d skipped' % (len(results), ok, failed, skipped))
+    return '; '.join(parts)
+
+
+def run_outcome(results, tests, run_info):
+    """Exit code: 0 = >= 1 scenario recorded, none without a passing attempt, tests clean;
+    1 = failures; 4 = nothing recorded (calibration / check only, or everything skipped) and nothing failed."""
+    passed = {r['scenario'] for r in results if r['status'] == 'pass'}
+    unpassed = {r['scenario'] for r in results if r['status'] == 'fail'} - passed
+    tests_bad = bool(tests) and (not tests.get('counts') or tests['counts']['fail'] or tests['counts']['error'])
+    if unpassed or tests_bad:
+        return 1, sorted(unpassed)
+    return (0 if passed else 4), []
+
+
 def write_report(cfg, run_info, results, tests, suites):
     d = os.path.join(cfg.runs_root, run_info['stamp'])
     os.makedirs(d, exist_ok=True)
-    ok = [r for r in results if r['status'] == 'pass']
-    failed = [r for r in results if r['status'] == 'fail']
-    verdict_parts = ['%d scenario attempt(s): %d pass, %d fail, %d skipped' % (
-        len(results), len(ok), len(failed), sum(1 for r in results if r['status'] == 'skipped'))]
+    verdict_parts = [verdict(results, run_info)]
     if tests and tests.get('counts'):
         verdict_parts.append('tests: %(pass)d pass, %(fail)d fail, %(error)d error, %(skip)d skip' % tests['counts'])
     report = dict(run_info, finished=datetime.datetime.now().isoformat(), suites=suites, capture_root=cfg.capture_root,
@@ -413,6 +512,17 @@ def render_md(rep):
               'captures and validate only the runner itself.', '']
     if rep.get('init_error'):
         L += ['Initialisation failed: `%s`' % rep['init_error'], '']
+    if rep.get('aborted'):
+        L += ['Run aborted: `%s` (all inputs released)' % rep['aborted'], '']
+    cal = rep.get('calibration')
+    if cal:
+        L += ['## Calibration', '', '| Action | Status | Key | Latency (frames) | Note |', '|---|---|---|---|---|']
+        for a, c in cal['actions'].items():
+            L.append('| %s | %s | %s | %s | %s |' % (a, c['status'], c.get('key') or '', c.get('latency_frames', ''),
+                                                    (c.get('reason') or '').replace('|', '/')))
+        L += ['', 'oIO variables present: `%s`  ' % ', '.join(cal['oio_variables_seen']),
+              'expected but absent: `%s`' % (', '.join(cal['oio_variables_missing']) or 'none'), '',
+              'Calibration confirms only that the game receives the keys; it validates no physics.', '']
     L += ['Capture root: `%s`  ' % rep['capture_root'], 'Failed recordings: `%s`' % rep['failed_root'], '',
           '| Scenario | Attempt | Status | Failure | Frames | Ack latency (frames) | Session |', '|---|---|---|---|---|---|---|']
     for r in rep['results']:

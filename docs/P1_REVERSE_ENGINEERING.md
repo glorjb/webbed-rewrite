@@ -180,6 +180,7 @@ Do not merge the two into a generic rope.
 | Pull strength `P` (L661–L677) | the weave branch starts with `weave_pull_power · clamp(d/10, 0, 1)` (L661, L666 hand-verified); the further terms on L667–L677 are **unresolved**; `pull_power = 5` exists in `init_spider_variables` | **Unknown** |
 | Near-anchor regime | `d ≤ 16`: no pull force from this block | High (structure) |
 | Attachment / release transitions | which variable flips on attach (`attached`, `grapple`, `webshot_node`), and whether release happens on button-up or by toggle | **Unknown.** The automated W1/W2 runs log every change of these variables frame by frame and record the observed release mode |
+| Retract / pull control | Live calibration (2026-10-11): none of SHIFT, S, CTRL, DOWN, MMB changed `oIO.retract`. `retract` has one global variable ID (101181), but YYC IDs are per *name*, so that does not show `oIO` owns it, and the probe returns only variables that exist on the instance. The player's `retract` is reset to 0 on firing (L183–L219); the pull-strength block (L661–L677) branches on **weave** | **Unknown.** Hypotheses: (a) `oIO` has no `retract`; (b) pulling = grapple + weave. `W4_retract_probe` measures each candidate key's effect on `oIO`, player variables and rope length while a grapple is held |
 
 `tools/reference/analyze_grapple.py` measures `P` from W* captures without decoding it:
 1. It inverts Box2D's semi-implicit Euler step over each hanging frame pair, with no horizontal input and no
@@ -287,6 +288,8 @@ with a known `P` is recovered exactly (`tests/test_analyze_grapple.py`). Three s
    against the running game. M2 and W1–W5 are automated (section 11) but not yet recorded live.
    - **Grapple pull strength `P`** (L661–L677) and the grapple attach/release state transitions (section 6b):
      `analyze_grapple.py` will measure `P` from W* captures, and the decode must then agree with it.
+   - **The retract / pull control** (section 6b): no key produced `oIO.retract` in live calibration.
+     Run `W4_retract_probe`, then decode L661–L677 and the `oIO` Step to confirm.
 2. `draw_spider` leg-segment arithmetic, plus remaining `?` values in the large events
    (`oPlayer_Step_0` ~215, `draw_spider` ~300) caused by values lost at loop/join points.
 3. Branch conditions guarding clinging, walking cap and web pull in `oPlayer_Step_0`. The calls are known; the gates are partly unknown.
@@ -446,7 +449,8 @@ Goal: record M2 and W1–W5 without manual play, keep the probe read-only, and n
   first one `oIO` reacts to. The result is stored in `DesktopPlaygroundLocal\auto_bindings.local.json`.
 
 **Scenarios** (IDs from REFERENCE_TEST_PROCEDURE.md): M2 → `M2_walk_flat`; W1 → `W1_attach_hang`;
-W2 → `W2_swing`, `W3_cut_mid_swing`, `W4_pull`; W3 (permanent webs) → `W5_weave_line`, `W5_weave_snap`.
+W2 → `W2_swing`, `W3_cut_mid_swing`; W4 → `W4_retract_probe` (experiment), `W4_pull`, which is skipped while no
+retract key is confirmed; W3 (permanent webs) → `W5_weave_line`, `W5_weave_snap`.
 - **Inferred, to be confirmed by the first live run:**
   - the grapple "attached" predicate (`attached` or `grapple` set, no shot in flight);
   - the anchor = `(gx, gy)`;
@@ -457,7 +461,7 @@ W2 → `W2_swing`, `W3_cut_mid_swing`, `W4_pull`; W3 (permanent webs) → `W5_we
 - **Not automated:** cutting a permanent web (control not recovered); skateboard scenarios.
 
 **Verification status:**
-- 27 runner unit tests pass against `autoref/mock.py`, a fake game with crude dynamics. It is **not** the
+- 34 runner unit tests pass against `autoref/mock.py`, a fake game with crude dynamics. It is **not** the
   recovered physics, and its output is never written to the real capture root. They cover:
   - the happy path and probe-compatible files;
   - missed inputs with retries and preservation;
@@ -472,6 +476,23 @@ W2 → `W2_swing`, `W3_cut_mid_swing`, `W4_pull`; W3 (permanent webs) → `W5_we
   - existing captures untouched;
   - calibration;
   - the aim fallback from `crosshair_tx/ty` to `oIO.aimx/aimy`; a clean failure without aim feedback;
-  - `-Check` working without focus.
+  - `-Check` working without focus;
+  - a readiness gate that never continues after a failed check and reports the measured speed;
+  - calibration explaining a missing `oIO` variable; partial recalibration keeping confirmed keys;
+    bindings backup;
+  - unresolved bindings skipped, not failed; "nothing recorded" never reported as passed;
+  - the retract probe identifying the key that changes the rope (on the mock);
+  - a focus-restore failure and an emergency stop while waiting for focus.
+
+**Live status (2026-10-11, owner's PC):**
+- Done:
+  - attach and the instance-list refresh work;
+  - calibration confirmed D and A (1-frame acknowledgement latency), SPACE (2), RMB/weave (1) and
+    LMB/grapple (2);
+  - the suite reported 53 pass, 0 fail, 9 skip.
+- Not done:
+  - retract is unresolved;
+  - **no gameplay scenario has been recorded live**;
+  - walking, grapple, pulling and permanent-web physics remain **unvalidated**.
 - **The Windows input driver and the live provider have not been run against Webbed yet.**
 - Mock latencies are synthetic; real input latency and hold accuracy will be reported by the first live run.

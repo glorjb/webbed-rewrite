@@ -369,6 +369,83 @@ def w4_pull(ctx, angle=20):
     yield from land(ctx)
 
 
+def w4_retract_probe(ctx, angle=60, hold=60, rest=30):
+    """EXPERIMENT (not a validation): while hanging on a held grapple, press each candidate key in
+    auto_bindings.json `retract_probe` for `hold` frames and record what changes:
+      * oIO variables whose values during the key differ from the grapple-only baseline (is it an input at all?),
+      * player `retract` / `weave` / `grapple` / `attached` / `pull_target` values,
+      * the rope-distance trend d(t) to the anchor vs the baseline trend (does it reel in / pay out?).
+    Answers: which control (if any) changes the grapple length, and whether it needs an active grapple. The
+    recovered pull-strength block (oPlayer_Step_0 L661-L677) branches on weave, so RMB/weave is tried first."""
+    ctx.track_transitions = True
+    yield from ctx.wait(LEAD_IN_FRAMES)
+    anchor = yield from shoot_grapple(ctx, angle)
+    if anchor is None:
+        raise ScenarioFailure('setup_invalid', 'grapple attached but no anchor (gx, gy) is readable')
+    skip = {(ctx.bindings.key(a) or '').upper() for a in ('grapple', 'jump', 'left', 'right')}
+    pvar_keys = ('retract', 'weave', 'grapple', 'attached', 'pull_target', 'webwalk', 'ground')
+
+    def measure(n):
+        ds, io_vals, pv_vals, engaged = [], {}, {}, 0
+        for _ in range(n):
+            yield
+            b = S.body(ctx.row)
+            if b:
+                ds.append(math.hypot(b['pos_px'][0] - anchor[0], b['pos_px'][1] - anchor[1]))
+            for k, v in S.io(ctx.row).items():
+                if k not in ('aimx', 'aimy', 'mvdir', 'mvmag'):
+                    io_vals.setdefault(k, set()).add(round(v, 3) if isinstance(v, float) else v)
+            for k in pvar_keys:
+                v = S.pvars(ctx.row).get(k)
+                pv_vals.setdefault(k, set()).add(round(v, 3) if isinstance(v, float) else v)
+            engaged += 1 if S.grapple_engaged(ctx.row) else 0
+        slope = (ds[-1] - ds[0]) / (len(ds) - 1) if len(ds) > 1 else None
+        return {'d_start': ds[0] if ds else None, 'd_end': ds[-1] if ds else None, 'd_slope_px_per_frame': slope,
+                'io': io_vals, 'player': pv_vals, 'engaged_frames': engaged, 'frames': n}
+
+    base = yield from measure(hold)
+    trials = []
+    for key in B.load_probe_candidates():
+        k = key.upper()
+        if k in skip:
+            continue
+        if not S.grapple_engaged(ctx.row):
+            trials.append({'key': k, 'result': 'not tried: the player was no longer on the grapple'})
+            break
+        ctx.mark()
+        ctx.driver.press(k)
+        ctx.log({'event': 'probe_press', 'key': k, 'after_frame': ctx.frame})
+        try:
+            m = yield from measure(hold)
+        finally:
+            ctx.driver.release(k)
+            ctx.log({'event': 'probe_release', 'key': k, 'after_frame': ctx.frame})
+        after = yield from measure(rest)
+        new_io = {v: sorted(map(str, m['io'][v] - base['io'].get(v, set()))) for v in m['io']
+                  if m['io'][v] - base['io'].get(v, set())}
+        new_pv = {v: sorted(map(str, m['player'][v] - base['player'].get(v, set()))) for v in m['player']
+                  if m['player'][v] - base['player'].get(v, set())}
+        bs, ms = base['d_slope_px_per_frame'], m['d_slope_px_per_frame']
+        trials.append({'key': k, 'oio_changed': new_io, 'player_changed': new_pv,
+                       'd_slope_px_per_frame': ms, 'd_slope_minus_baseline': (ms - bs) if None not in (ms, bs) else None,
+                       'd_start': m['d_start'], 'd_end': m['d_end'], 'engaged_frames': m['engaged_frames'],
+                       'still_engaged_after': after['engaged_frames'] == rest})
+    ctx.note('retract_probe', {'angle_deg': angle, 'anchor': anchor, 'hold_frames': hold,
+                               'baseline': {'d_slope_px_per_frame': base['d_slope_px_per_frame'],
+                                            'd_start': base['d_start'], 'd_end': base['d_end'],
+                                            'oio_values': {k: sorted(map(str, v)) for k, v in base['io'].items()},
+                                            'player_values': {k: sorted(map(str, v)) for k, v in base['player'].items()}},
+                               'trials': trials,
+                               'interpretation': 'measured only; a key that changes oIO or the d trend is a CANDIDATE '
+                                                 'for the pull control, to be confirmed against the decoded code'})
+    if S.grapple_engaged(ctx.row):
+        yield from release_grapple(ctx)
+    else:
+        ctx.release('grapple')
+        yield from ctx.await_ack('grapple', False)
+    yield from land(ctx)
+
+
 def w5_weave_line(ctx, angle=20):
     """Permanent web: weave one line, observe it hands-off 5 s (tension / slack), then walk away from it for
     2 s to load it, release, wait 2 s."""
@@ -417,7 +494,10 @@ SCENARIOS = {s.id: s for s in [
              needs=('grapple',), max_frames=4800),
     Scenario('W3_cut_mid_swing', 'W2', w3_cut_mid_swing,
              'Same spot as W2_swing.', needs=('grapple',), max_frames=6000),
-    Scenario('W4_pull', 'W2', w4_pull,
+    Scenario('W4_retract_probe', 'W4', w4_retract_probe,
+             'Solid ground under a ceiling about 6-10 spider-lengths away at ~60 deg up-right (long rope, open space).',
+             needs=('grapple',), max_frames=3600),
+    Scenario('W4_pull', 'W4', w4_pull,
              'Solid ground with a wall/surface about 6 spider-lengths away at ~20 deg up-right.',
              needs=('grapple', 'retract'), max_frames=2400),
     Scenario('W5_weave_line', 'W3', w5_weave_line,
@@ -430,7 +510,8 @@ SCENARIOS = {s.id: s for s in [
 SUITES = {
     'M2': ['M2_walk_flat'],                                   # walking acceleration, stopping, max speed
     'W1': ['W1_attach_hang'],                                 # grapple projectile, attachment, hang, release
-    'W2': ['W2_swing', 'W3_cut_mid_swing', 'W4_pull'],        # grapple tension, swinging, release, retract
+    'W2': ['W2_swing', 'W3_cut_mid_swing'],                   # grapple tension, swinging, release
+    'W4': ['W4_retract_probe', 'W4_pull'],                    # pull / retract control: experiment, then scenario
     'W3': ['W5_weave_line', 'W5_weave_snap'],                 # permanent webs: creation, pulling, snapping
 }
-SUITE_ORDER = ['M2', 'W1', 'W2', 'W3']
+SUITE_ORDER = ['M2', 'W1', 'W2', 'W4', 'W3']

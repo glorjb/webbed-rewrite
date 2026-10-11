@@ -7,6 +7,8 @@ order and keeps the first one the game reacts to. The result is stored locally (
 """
 import json
 import os
+import shutil
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULTS_FILE = os.path.join(HERE, '..', 'auto_bindings.json')
@@ -76,6 +78,23 @@ class Bindings:
         return cls(d['keys'], source='local file %s' % path, calibrated=d.get('calibrated'))
 
     def save(self, path):
+        """Write the bindings; an existing file is first copied to <name>.<timestamp>.bak.json (never lost)."""
         os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        backup = None
+        if os.path.exists(path):
+            root, ext = os.path.splitext(path)
+            backup = '%s.%s.bak%s' % (root, time.strftime('%Y%m%d-%H%M%S'), ext)
+            n = 1
+            while os.path.exists(backup):
+                n += 1
+                backup = '%s.%s-%d.bak%s' % (root, time.strftime('%Y%m%d-%H%M%S'), n, ext)
+            shutil.copy2(path, backup)
         with open(path, 'w') as f:
             json.dump(self.to_json(), f, indent=1)
+        return backup
+
+
+def load_probe_candidates(path=DEFAULTS_FILE):
+    """Keys tried by W4_retract_probe while a grapple is attached."""
+    with open(path) as f:
+        return list(json.load(f).get('retract_probe', []))
