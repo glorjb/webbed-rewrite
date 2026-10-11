@@ -288,3 +288,25 @@ def grapple_pull_force(d, vx_step, vy_step, dir_g_deg, P, mass_kg):
     far = (lengthdir_x(P, dir_g_deg), lengthdir_y(P, dir_g_deg))
     near = (lengthdir_x(c, dir_g_deg) - vx_step, lengthdir_y(c, dir_g_deg) - vy_step - 10 * mass_kg)
     return far[0] + (near[0] - far[0]) * w, far[1] + (near[1] - far[1]) * w
+
+
+# ---------------------------------------------------------------- walking (oPlayer_Step_0; see P1 section 5)
+# Recovered calls (High) with partly unknown gating (Medium):
+#   force:  physics_apply_force(phy_com, xoff(io.hm * walkforce * 2, 0, ground.image_angle), yoff(...))   (N)
+#   target: xoff/yoff(max_walkspd * io.hm, 0, rclamp(ground_angle, -45, 45))                            (px/step)
+# xoff(x, 0, a) = x * dcos(a), yoff(x, 0, a) = x * dsin(a)  (hand-verified scripts). NOT recovered: when the force is
+# applied (the gate), the clinging condition, and Box2D contact friction / normal forces on slopes. So only these
+# are code-derived: the target vector (magnitude max_walkspd, direction from the clamped ground angle) and the
+# force-only velocity change of one step. A frame-by-frame slope trajectory cannot be predicted from them alone.
+def walk_target_velocity(hm, ground_angle_deg):
+    """Speed target (px/step) from the recovered formula. rclamp is approximated by a plain clamp, valid for
+    ground angles already in [-180, 180) (MEDIUM: rclamp's comparisons are not hand-verified)."""
+    a = max(-45.0, min(45.0, ((ground_angle_deg + 180.0) % 360.0) - 180.0))
+    return MAX_WALKSPD * hm * dcos(a), MAX_WALKSPD * hm * dsin(a)
+
+
+def walk_force_dv_per_step(hm=1):
+    """Velocity change (px/step per step) from the walking force alone over one Box2D step: |F| = walkforce * 2 N on
+    the player's mass. Excludes gravity, clinging, friction and the unknown gate: an upper bound for flat ground."""
+    a_mps2 = abs(hm) * WALKFORCE * 2 / player_mass_kg()
+    return a_mps2 / M_PER_PX / ROOM_SPEED / ROOM_SPEED

@@ -913,11 +913,18 @@ def walk_metrics(path):
 
 
 # ------------------------------------------------------------------------------------------ tests + report
-def run_tests(capture_root, out_json, pattern='test*.py'):
+TESTS_TIMEOUT_S = 900
+
+
+def run_tests(capture_root, out_json, pattern='test*.py', timeout=TESTS_TIMEOUT_S):
     env = dict(os.environ, DP_CAPTURES=capture_root)
     script = os.path.join(HERE, 'testrun.py')
-    proc = subprocess.run([sys.executable, '-I', script, '--json', out_json, '--pattern', pattern], env=env,
-                          capture_output=True, text=True)
+    try:
+        proc = subprocess.run([sys.executable, '-I', script, '--json', out_json, '--pattern', pattern], env=env,
+                              capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {'counts': None, 'tests': [], 'error': 'regression tests timed out after %d s' % timeout,
+                'exit_code': None}
     try:
         with open(out_json) as f:
             res = json.load(f)
@@ -965,7 +972,8 @@ def run_outcome(results, tests, run_info):
     1 = failures; 4 = nothing recorded (calibration / check only, or everything skipped) and nothing failed."""
     passed = {r['scenario'] for r in results if r['status'] == 'pass'}
     unpassed = {r['scenario'] for r in results if r['status'] == 'fail'} - passed
-    tests_bad = bool(tests) and (not tests.get('counts') or tests['counts']['fail'] or tests['counts']['error'])
+    tests_bad = bool(tests) and not tests.get('pending') and (not tests.get('counts') or tests['counts']['fail']
+                                                              or tests['counts']['error'])
     if unpassed or tests_bad:
         return 1, sorted(unpassed)
     return (0 if passed else 4), []
@@ -975,11 +983,16 @@ def write_report(cfg, run_info, results, tests, suites):
     d = os.path.join(cfg.runs_root, run_info['stamp'])
     os.makedirs(d, exist_ok=True)
     verdict_parts = [verdict(results, run_info)]
-    if tests and tests.get('counts'):
+    if tests and tests.get('pending'):
+        verdict_parts.append('regression tests: running')
+    elif tests and tests.get('counts'):
         verdict_parts.append('tests: %(pass)d pass, %(fail)d fail, %(error)d error, %(skip)d skip' % tests['counts'])
+    elif tests and tests.get('error'):
+        verdict_parts.append('regression tests not completed (%s)' % tests['error'][:120])
     report = dict(run_info, finished=datetime.datetime.now().isoformat(), suites=suites, capture_root=cfg.capture_root,
                   failed_root=cfg.failed_root, results=results, tests=tests,
-                  relevant_tests=relevant(tests['tests'], suites) if tests else [], verdict='; '.join(verdict_parts))
+                  relevant_tests=relevant(tests.get('tests', []), suites) if tests else [],
+                  verdict='; '.join(verdict_parts))
     with open(os.path.join(d, 'report.json'), 'w') as f:
         json.dump(report, f, indent=1, default=str)
     with open(os.path.join(d, 'report.md'), 'w') as f:
@@ -1021,6 +1034,9 @@ def render_md(rep):
             L += ['', '### %s (attempt %s) observations (measured, not asserted)' % (r['scenario'], r.get('attempt')),
                   '```', json.dumps(obs, indent=1, default=str)[:4000], '```']
     t = rep.get('tests')
+    if t and t.get('pending'):
+        L += ['', '## Regression tests', '', 'running (this report is updated when they finish)']
+        t = None
     if t and t.get('counts'):
         L += ['', '## Regression tests', '', 'Totals: %(pass)d pass, %(fail)d fail, %(error)d error, %(skip)d skip' % t['counts'],
               '', '| Test | Outcome | Detail |', '|---|---|---|']

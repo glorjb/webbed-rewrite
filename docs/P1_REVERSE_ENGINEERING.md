@@ -12,6 +12,15 @@ captures yet. An automated, state-aware recorder now exists for them (section 11
 against a mock game; **live validation on Windows is pending.**
 Nothing in this document is claimed to be behaviourally faithful until the corresponding capture tests pass.
 
+### Validation status (updated after the first passing live walk, M2_walk_dir_20261011-055812)
+| Category | Status | Evidence |
+|---|---|---|
+| **Capture accuracy** | **Verified**, for M3 and M2_walk_dir | M2_walk_dir: 428 rows, 60 Hz, 100 % coverage, 0 skipped, 9 torn; one player instance (id 103464) throughout; body position equals instance x/y, and position changes follow the recorded velocity (`analyze_walk.py` sampling check) |
+| **Code-derived movement parameters** | **Read from the binary** (High; values not behaviour) | walkforce 5 (force `walkforce·2` = 10 N along `ground.image_angle`), max_walkspd 3.5 px/step, speed target `3.5·hm·(cos a, sin a)` with `a = rclamp(ground_angle, −45, 45)` (`sim/webbed_model.walk_target_velocity`), force-only velocity change 0.5413 px/step per step (`walk_force_dv_per_step`). Gate of the force and the clinging condition: Medium / unknown |
+| **Free flight and jumps** | **Validated** (M3) | quadratic air drag 0.005 (367 pairs, RMS 0.000005 px/s), jump velocity (8/8), head-bump restitution 0.15 (8/8). Tolerances unchanged |
+| **Flat-ground walking** | **Not yet validated** | M2_walk_dir had no level segment: 90 grounded frames at ground angles −27.5°…+2.8°; `analyze_walk.py` found no phase with ≥ 20 level frames. `test_walk_plateau_speed` now compares level frames only (|angle| ≤ 5°, ≥ 60 frames; target 3.5 ± 0.25 unchanged) and is INCONCLUSIVE for that capture |
+| **Slope / contact physics** | **Unvalidated** | The observed horizontal speed of 3.08 px/step (peak 3.23) at about −27.5° is close to the target's horizontal share 3.5·cos 27.5° = 3.10, which is *consistent with* a speed target along the surface; it is not a validation. Predicting a slope trajectory frame by frame needs the force gate, the clinging condition and Box2D contact friction/normal forces, none of which are recovered. `analyze_walk.py` compares the code target vector frame by frame and labels slopes INCONCLUSIVE |
+
 ### Confidence levels
 - **Verified:** read from the binary and confirmed by an independent path, either a second artefact
   (data.win, runner getter, Ghidra) or a hand decode of the assembly.
@@ -143,6 +152,13 @@ Box2D step. `oPlayer_Step_2` / `oWeb_Step_2` (End Step) see post-step positions.
 
   *High*, except `max2`'s exact semantics, which are *Medium*.
 - **Ground velocity matching:** `lerp(phy_speed, ground.phy_speed, 0.2)`. *High.*
+- **Speed target direction (correction, 2026-10-11):** `xoff/yoff(max_walkspd·hm, 0, a)` = `max_walkspd·hm·(dcos a, dsin a)`.
+  It is a vector along the clamped ground angle, so `max_walkspd` bounds the speed **along the surface**. The
+  horizontal component equals 3.5 only on level ground. The first version of `test_walk_plateau_speed` compared
+  horizontal speed on all grounded frames, which is wrong on slopes by the code's own formula. It now uses level
+  frames only.
+  - Which sign convention `ground_angle` uses relative to screen y is decided by data:
+    `analyze_walk.py --frames` reports the direction error for both `(cos a, sin a)` and `(cos a, −sin a)`.
 
 ## 6. Webs (`oWeb_*`, `create_web`, `snap_web`, `reset_web_tracking`)
 **Webs are not Box2D joints.** A whole-program scan shows joints only in level props. **Verified.**

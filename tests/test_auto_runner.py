@@ -731,6 +731,27 @@ class TestPipeline(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class ReportFinalisation(unittest.TestCase):
+    def test_report_exists_before_tests_and_survives_their_failure(self):
+        tmp = tempfile.mkdtemp(prefix='dp_mock_test_')
+        try:
+            cfg = Config(os.path.join(tmp, 'mock', 'captures'), mode='mock')
+            info = {'stamp': '20990101-000000', 'mode': 'mock'}
+            results = [{'scenario': 'M2_walk_dir', 'suite': 'M2', 'status': 'pass', 'failure': None}]
+            d, rep = RN.write_report(cfg, info, results, {'pending': True}, ['M2'])
+            with open(os.path.join(d, 'report.md')) as f:
+                self.assertIn('running', f.read())
+            self.assertEqual(RN.run_outcome(results, {'pending': True}, info), (0, []))
+            err = RN.run_tests(os.path.join(tmp, 'none'), os.path.join(tmp, 't.json'), pattern='test_recovered_model.py',
+                               timeout=0.001)
+            self.assertIn('timed out', err['error'])
+            d, rep = RN.write_report(cfg, info, results, err, ['M2'])
+            self.assertIn('not completed', rep['verdict'])
+            self.assertIn('1 pass', rep['verdict'])                      # the scenario result is kept
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class StateRules(unittest.TestCase):
     def row(self, **v):
         return {'frame': 1, 'world': {'speed': 60, 'iterations': 10, 'm_per_px': 0.03}, 'io': {'hm': 0},

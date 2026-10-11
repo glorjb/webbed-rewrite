@@ -15,7 +15,13 @@ For every session:
      max_walkspd = 3.5 (a hypothesis), frames to 90 % of the plateau, stopping after release.
   5. free flight after leaving the ground: the verified drag model (sim/webbed_model.player_free_flight_dv)
      against the recorded velocity change, as tests/test_reference_captures.test_free_fall_gravity does.
-  6. --tests: copies (never moves) the sessions into a temporary capture root and runs the regression suite
+  6. frame-by-frame comparison with the CODE-DERIVED walking target (sim/webbed_model.walk_target_velocity:
+     3.5 * hm * (cos a, sin a), a = clamp(ground_angle, -45, 45)): recorded velocity vector vs target, magnitude
+     and direction errors, every frame either 'valid' (grounded, steady, away from support changes) or rejected
+     with its reason. Level ground (|a| <= 5) gives a PASS / FAIL / INCONCLUSIVE cap verdict; sloped frames are
+     always INCONCLUSIVE (force gate, clinging and slope contact friction are not recovered) and only reported.
+     Acceleration (first frames vs the force-only bound walk_force_dv_per_step) and post-release deceleration.
+  7. --tests: copies (never moves) the sessions into a temporary capture root and runs the regression suite
      there, so their real data is checked against the recovered model while the originals stay preserved.
 """
 import argparse
@@ -35,6 +41,7 @@ import capture_lib as cap   # noqa: E402
 import webbed_model as m    # noqa: E402
 
 LEVEL_DEG = 5.0
+SHOW_FRAMES = False
 STEEP_DEG = 30.0
 H = 1.0 / m.ROOM_SPEED
 
@@ -179,6 +186,124 @@ def level_walk(frames, phs):
     return out
 
 
+STEADY_DV = 0.05        # px/step: |v| change over +-1 frame below this = steady (not accelerating)
+NEAR_CHANGE = 3         # frames around a support / ground-instance change that are rejected
+
+
+def _deg_between(u, v):
+    nu, nv = math.hypot(*u), math.hypot(*v)
+    if nu < 1e-9 or nv < 1e-9:
+        return None
+    c = max(-1.0, min(1.0, (u[0] * v[0] + u[1] * v[1]) / (nu * nv)))
+    return math.degrees(math.acos(c))
+
+
+def model_comparison(frames, phs):
+    """Per walking phase: frame-by-frame recorded velocity vs the code-derived target, with rejection reasons,
+    plus acceleration / deceleration profiles. Velocities in px/step (GameMaker phy_speed units)."""
+    out = []
+    keyf = lambda r: (cap.support(r), _v(r).get('ground'))   # noqa: E731
+    for ph in phs:
+        idx = list(range(ph['start'], ph['end'] + 1))
+        hm = ph['dir']
+        rows, counts = [], {}
+        for j, i in enumerate(idx):
+            r = frames[i]
+            b = _b(r)
+            rec = {'k': j, 'frame': r['frame']}
+            status = None
+            if not b:
+                status = 'player_missing'
+            elif r['torn']:
+                status = 'torn_row'
+            elif i > 0 and frames[i - 1]['frame'] != r['frame'] - 1:
+                status = 'frame_gap'
+            elif cap.support(r) != 'ground':
+                status = 'not_on_ground'
+            if b:
+                v = (b['vel_pxps'][0] / m.ROOM_SPEED, b['vel_pxps'][1] / m.ROOM_SPEED)
+                a = _ang(_v(r))
+                rec.update(vx=round(v[0], 4), vy=round(v[1], 4), speed=round(math.hypot(*v), 4),
+                           angle=None if a is None else round(a, 2))
+                if a is not None:
+                    t = m.walk_target_velocity(hm, a)
+                    alt = (t[0], -t[1])
+                    rec.update(tx=round(t[0], 4), ty=round(t[1], 4), err_speed=round(math.hypot(*v) - m.MAX_WALKSPD, 4),
+                               err_vx=round(v[0] - t[0], 4), dir_err_code_deg=_deg_between(v, t),
+                               dir_err_flipped_deg=_deg_between(v, alt))
+                elif status is None:
+                    status = 'no_ground_angle'
+                if status is None:
+                    lo, hi = max(0, i - NEAR_CHANGE), min(len(frames) - 1, i + NEAR_CHANGE)
+                    if any(_b(frames[q]) is None or keyf(frames[q]) != keyf(r) for q in range(lo, hi + 1)):
+                        status = 'near_support_change'
+                if status is None:
+                    bp, bn = _b(frames[i - 1]) if i > 0 else None, _b(frames[i + 1]) if i + 1 < len(frames) else None
+                    if not (bp and bn):
+                        status = 'no_neighbours'
+                    else:
+                        sp = math.hypot(*bp['vel_pxps']) / m.ROOM_SPEED
+                        sn = math.hypot(*bn['vel_pxps']) / m.ROOM_SPEED
+                        if abs(sn - sp) > STEADY_DV:
+                            status = 'accelerating'
+            status = status or 'valid'
+            rec['status'] = status
+            counts[status] = counts.get(status, 0) + 1
+            rows.append(rec)
+        valid = [x for x in rows if x['status'] == 'valid']
+        level = [x for x in valid if abs(x['angle']) <= LEVEL_DEG]
+        sloped = [x for x in valid if abs(x['angle']) > LEVEL_DEG]
+        med = lambda xs: round(statistics.median(xs), 4) if xs else None   # noqa: E731
+        res = {'direction': 'right' if hm > 0 else 'left', 'frames': len(rows), 'status_counts': counts,
+               'valid_frames': len(valid)}
+        if len(level) >= 60:
+            h = sorted(abs(x['vx']) for x in level)[int(0.9 * len(level))]
+            verdict = 'PASS' if abs(h - m.MAX_WALKSPD) <= 0.25 else 'FAIL'
+        else:
+            h, verdict = None, 'INCONCLUSIVE'
+        res['level_cap'] = {'valid_level_frames': len(level), 'p90_abs_vx': None if h is None else round(h, 4),
+                            'median_abs_vx': med([abs(x['vx']) for x in level]), 'target': m.MAX_WALKSPD,
+                            'tolerance': 0.25, 'verdict': verdict,
+                            'reason': None if verdict != 'INCONCLUSIVE' else
+                            '%d valid level frames (|angle| <= %.0f deg), need >= 60' % (len(level), LEVEL_DEG)}
+        res['sloped'] = {'valid_sloped_frames': len(sloped),
+                         'angle_range': [min(x['angle'] for x in sloped), max(x['angle'] for x in sloped)] if sloped else None,
+                         'median_speed': med([x['speed'] for x in sloped]),
+                         'median_err_speed_vs_3.5': med([x['err_speed'] for x in sloped]),
+                         'median_abs_vx': med([abs(x['vx']) for x in sloped]),
+                         'median_abs_target_vx': med([abs(x['tx']) for x in sloped]),
+                         'median_err_vx_vs_target': med([x['err_vx'] for x in sloped]),
+                         'median_dir_err_code_deg': med([x['dir_err_code_deg'] for x in sloped if x['dir_err_code_deg'] is not None]),
+                         'median_dir_err_flipped_deg': med([x['dir_err_flipped_deg'] for x in sloped
+                                                            if x['dir_err_flipped_deg'] is not None]),
+                         'verdict': 'INCONCLUSIVE',
+                         'reason': 'a frame-by-frame slope prediction needs the walking-force gate (Medium), the clinging '
+                                   'condition (unknown) and Box2D contact friction/normal forces (not modelled); the code '
+                                   'target is compared for information only'}
+        bodies = [frames[i] for i in idx if _b(frames[i])]
+        acc = []
+        for x, y in zip(bodies, bodies[1:11]):
+            vx0, vx1 = x['player']['body']['vel_pxps'][0] * hm / m.ROOM_SPEED, y['player']['body']['vel_pxps'][0] * hm / m.ROOM_SPEED
+            acc.append(round(vx1 - vx0, 4))
+        plateau = med([x['speed'] for x in valid])
+        t90 = None
+        if plateau:
+            t90 = next((n for n, r in enumerate(bodies) if math.hypot(*r['player']['body']['vel_pxps']) / m.ROOM_SPEED
+                        >= 0.9 * plateau), None)
+        res['acceleration'] = {'dvx_per_frame_first10': acc, 'force_only_bound_px_step2': round(m.walk_force_dv_per_step(), 4),
+                               'frames_to_90pct_of_steady_speed': t90,
+                               'note': 'force-only bound excludes friction, gravity/clinging and the unknown gate'}
+        after = [frames[i] for i in range(ph['end'] + 1, min(len(frames), ph['end'] + 61)) if _b(frames[i])]
+        sp_after = [round(math.hypot(*r['player']['body']['vel_pxps']) / m.ROOM_SPEED, 4) for r in after]
+        res['deceleration'] = {'speed_after_release_first20': sp_after[:20],
+                               'frames_to_below_0.05': next((n for n, v in enumerate(sp_after) if v < 0.05), None),
+                               'support_after': sorted({cap.support(r) or 'air' for r in after[:30]}),
+                               'prediction': 'none: post-release contact friction is not recovered'}
+        res['rows'] = rows
+        out.append(res)
+    return out
+
+
 def free_flight(frames, s):
     segs = cap.web_segments(s.webs)
     res = []
@@ -211,7 +336,8 @@ def analyze(path):
                'support': cap.support(first), 'ground': _v(first).get('ground'), 'ground_angle': _ang(_v(first)),
                'room': first.get('room')},
            'phases': [classify_phase(fr, ph, x0) for ph in phs], 'transitions': transitions(fr, x0)[:60],
-           'level_walk': level_walk(fr, phs), 'free_flight': free_flight(fr, s)}
+           'level_walk': level_walk(fr, phs), 'free_flight': free_flight(fr, s),
+           'model_comparison': model_comparison(fr, phs)}
     xs = [r['player']['body']['pos_px'][0] - x0 for r in fr if _b(r)]
     out['travel'] = {'max_right_px': round(max(xs), 1), 'max_left_px': round(-min(xs), 1), 'final_px': round(xs[-1], 1)} if xs else None
     auto = os.path.join(path, 'auto_run.json')
@@ -263,6 +389,21 @@ def print_report(a):
         print('    %(frame)d %(support)-6s %(ground)-8s %(ground_angle)-6s %(x_from_start)8s %(y)8s hm=%(hm)s v=%(vel_pxps)s' % t)
     print('  level-ground walking: %s' % (a['level_walk'] or 'no phase with >= 20 level-ground frames'))
     print('  free flight vs the verified drag model: %s' % a['free_flight'])
+    for c in a['model_comparison']:
+        print('  code-target comparison, %s phase (%d frames; status %s):' % (c['direction'], c['frames'], c['status_counts']))
+        print('    level cap:  %s' % c['level_cap'])
+        print('    sloped:     %s' % {k: v for k, v in c['sloped'].items() if k != 'reason'})
+        print('                (%s)' % c['sloped']['reason'])
+        print('    accel:      %s' % c['acceleration'])
+        print('    decel:      %s' % c['deceleration'])
+        if SHOW_FRAMES:
+            print('    k   frame   status               angle    vx      vy    |v|    tx      ty   err|v|  dir_err(code/flipped)')
+            for x in c['rows']:
+                print('    %-3d %-7s %-20s %6s %7s %7s %6s %7s %7s %7s  %s / %s' % (
+                    x['k'], x['frame'], x['status'], x.get('angle'), x.get('vx'), x.get('vy'), x.get('speed'),
+                    x.get('tx'), x.get('ty'), x.get('err_speed'),
+                    None if x.get('dir_err_code_deg') is None else round(x['dir_err_code_deg'], 1),
+                    None if x.get('dir_err_flipped_deg') is None else round(x['dir_err_flipped_deg'], 1)))
 
 
 def main():
@@ -270,7 +411,10 @@ def main():
     ap.add_argument('sessions', nargs='+')
     ap.add_argument('--tests', action='store_true', help='run test_reference_captures on COPIES of the sessions')
     ap.add_argument('--json')
+    ap.add_argument('--frames', action='store_true', help='print the frame-by-frame comparison table')
     a = ap.parse_args()
+    global SHOW_FRAMES
+    SHOW_FRAMES = a.frames
     reports = [analyze(p) for p in a.sessions]
     for r in reports:
         print_report(r)

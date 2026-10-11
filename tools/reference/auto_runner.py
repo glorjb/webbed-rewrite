@@ -314,14 +314,24 @@ def main(argv=None):
         if provider:
             provider.close()
     results = runner.results if runner else []
-    tests = None
-    if cfg.run_tests:
-        print('Running regression tests against %s ...' % cfg.capture_root)
-        os.makedirs(cfg.runs_root, exist_ok=True)
-        tests = RN.run_tests(cfg.capture_root, os.path.join(cfg.runs_root, 'tests_%s.json' % run_info['stamp']))
     if a.check:
         return code
-    d, rep = RN.write_report(cfg, run_info, results, tests, suites)
+    # the run's own results are final now: write the report BEFORE the optional regression tests, so an interrupted
+    # or crashing test run can never cost the report (sessions and auto_run.json are already written per scenario)
+    d, rep = RN.write_report(cfg, run_info, results, {'pending': True} if cfg.run_tests else None, suites)
+    print('report (scenarios): %s' % os.path.join(d, 'report.md'))
+    tests = None
+    if cfg.run_tests:
+        print('Running regression tests against %s ... (optional; Ctrl+C skips them, the report is already saved)'
+              % cfg.capture_root)
+        os.makedirs(cfg.runs_root, exist_ok=True)
+        try:
+            tests = RN.run_tests(cfg.capture_root, os.path.join(cfg.runs_root, 'tests_%s.json' % run_info['stamp']))
+        except KeyboardInterrupt:
+            tests = {'counts': None, 'tests': [], 'error': 'regression tests interrupted (Ctrl+C); scenario results unaffected'}
+        except Exception as e:            # never lose the run because of the optional tests
+            tests = {'counts': None, 'tests': [], 'error': 'regression test run failed: %r' % e}
+        d, rep = RN.write_report(cfg, run_info, results, tests, suites)
     print('')
     print(rep['verdict'])
     outcome, unpassed = RN.run_outcome(results, tests, run_info)
