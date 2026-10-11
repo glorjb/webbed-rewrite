@@ -23,11 +23,13 @@ import time
 
 from . import aim as A
 from . import bindings as B
+from . import groundscan as G
 from . import state as S
 from .capture import SessionWriter
 from .driver import AbortRun, SafetyGuard
 from .provider import GameLost
-from .scenarios import ACK_FRAMES, SCENARIOS, SIGHT_ANGLES, SUITES, Ctx, ScenarioFailure, sight
+from .scenarios import (ACK_FRAMES, SCENARIOS, SIGHT_ANGLES, SUITES, Ctx, RelativeAim, ScenarioFailure,
+                        sight)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RETRYABLE = {'missed_input', 'capture_invalid', 'inconsistent', 'timeout', 'aim_failed'}
@@ -49,7 +51,7 @@ def stamp():
 
 class Config:
     def __init__(self, capture_root, retries=1, prompt=True, run_tests=True, mouse_failsafe=True,
-                 bindings_file=None, mode='live'):
+                 bindings_file=None, mode='live', trust_ground=False):
         self.capture_root = capture_root
         parent = os.path.dirname(os.path.normpath(capture_root))
         self.failed_root = os.path.join(parent, 'captures_failed')
@@ -58,6 +60,7 @@ class Config:
         self.aim_profile_file = os.path.join(parent, 'aim_profile.local.json')
         self.retries, self.prompt, self.run_tests = retries, prompt, run_tests
         self.mouse_failsafe, self.mode = mouse_failsafe, mode
+        self.trust_ground = trust_ground    # DIAGNOSTIC: walk although the ground scan is ambiguous / unavailable
 
 
 class ConsoleUI:
@@ -123,9 +126,16 @@ class Runner:
         tr = S.SettleTracker()
         reasons = ['no frame']
         best, speeds = 0, []
-        for _ in range(timeout):
+        pause = None
+        for n in range(timeout):
             row = self.frame()
             reasons = S.readiness(row, need_support)
+            if n % 30 == 0 and hasattr(self.p, 'pause_state'):
+                pause = self.p.pause_state()       # menus / paused flag: an instance walk, so not every frame
+            if pause and (pause['menus'] or any(pause['paused'].values())):
+                reasons = reasons + ['the game is paused or a menu is open (%s); close it - the runner waits '
+                                     'and ignores your input until then' % (pause['menus'] or pause['paused'])]
+                tr.frames = 0
             tr.update(row)
             best = max(best, tr.frames)
             if S.body(row):
@@ -169,15 +179,33 @@ class Runner:
         if not self.d.focus_game():
             raise AbortRun('could not bring the Webbed window to the foreground; click its TITLE BAR (not inside '
                            'the window, which would fire a web) and run again')
-        self.d.arm()                    # takeover detection from now on (physical input only; see inputhook.py)
+
+    def arm(self, phase):
+        """Takeover detection ON. Called only after focus, readiness (incl. unpaused / no menu) and setup are
+        complete, right before the runner's own inputs. F12 / Pause work in every phase regardless."""
+        self.d.arm()
+        self.ui.say('     [takeover detection armed: %s; hands off - F12 / Pause stops]' % phase)
 
     def _load_aim_profile(self):
+        """Verified aim profile from -AimScan: 'relative' (locked cursor, delta impulses) or absolute feedback."""
         try:
             with open(self.cfg.aim_profile_file) as f:
                 prof = json.load(f)
-            return prof if prof.get('feedback_pair') else None
         except (OSError, ValueError):
             return None
+        return prof if (prof.get('mode') == 'relative' and prof.get('pair')) or prof.get('feedback_pair') else None
+
+    def cursor_locked(self):
+        """Does the game pull the cursor back to a fixed point (relative-mouse aiming)? One small move."""
+        c0 = self.d.cursor_client()
+        if c0 is None:
+            return False
+        w, h = self.d.client_size()
+        self.d.move_mouse(min(w - 5, c0[0] + 60), c0[1])
+        for _ in range(4):
+            self.frame()
+        c1 = self.d.cursor_client()
+        return c1 is not None and abs(c1[0] - c0[0]) + abs(c1[1] - c0[1]) < 10
 
     # ---------------------------------------------------------------- calibration
     CAL_ORDER = ('right', 'left', 'jump', 'retract', 'weave', 'grapple')
@@ -194,6 +222,7 @@ class Runner:
         cal = dict(base.calibrated)
         report = {}
         self.ensure_ready('any', 'calibration start')
+        self.arm('calibration')
         used = {k.upper() for a, k in keys.items() if k and a not in actions}
         for i, action in enumerate(actions):
             if i:
@@ -243,6 +272,7 @@ class Runner:
                             if v not in self.io_keys_seen)
         self.calibration = {'actions': report, 'oio_variables_seen': sorted(self.io_keys_seen),
                             'oio_variables_missing': missing_io}
+        self.d.disarm()
         self.b = B.Bindings(keys, source='calibrated %s' % stamp(), calibrated=cal)
         return self.b
 
@@ -276,30 +306,34 @@ class Runner:
                               'msg': 'no confirmed key for %s; nothing was recorded (see -Calibrate%s)' % (
                                   missing, ' and W4_retract_probe' if 'retract' in missing else '')}
             return res
+        self.d.disarm()                 # readiness / unpausing: the user may still be touching the game
         reasons = self.wait_ready(sc.support)
         if reasons:
             res['failure'] = {'kind': 'not_ready', 'msg': '; '.join(reasons)}
             return res
         if sc.space:                    # setup validation BEFORE any input: is there enough walkable ground?
-            prof = self.p.ground_profile(self.last_row)
-            res['ground_profile'] = prof
-            if prof.get('confidence') == 'estimate':
-                short = {d: (prof[d]['clear_px'], need) for d, need in sc.space.items()
-                         if prof.get(d) and prof[d]['clear_px'] < need}
-                if short:
-                    res['status'] = 'skipped'
-                    res['failure'] = {'kind': 'insufficient_space', 'msg': 'nothing sent: estimated clear ground %s '
-                                      '(have, need px); move to a longer flat area' % short}
-                    return res
-            else:
-                self.ui.say('     ground scan unavailable (%s); walking without a pre-check' % prof.get('reason'))
+            gate = self._ground_gate(sc, res)
+            if gate:
+                return gate
+        self.arm(sc.id)
         aimer, aim_sources = None, None
         if sc.aim:
-            if self.aim_profile:
-                pair = self.aim_profile['feedback_pair']
+            prof = self.aim_profile
+            if prof and prof.get('mode') == 'relative':
+                aimer = RelativeAim(prof)
+                res['aim_method'] = 'relative (%s via %s impulses)' % ('/'.join(prof['pair']), prof['method'])
+            elif prof and prof.get('feedback_pair'):
+                pair = prof['feedback_pair']
                 (sx, vx), (sy, vy) = (pair[0].split('.', 1), pair[1].split('.', 1))
                 aim_sources = [(sx, vx, vy)] if sx == sy else None
-            if not aim_sources:
+                res['aim_method'] = 'absolute feedback (%s)' % '/'.join(pair)
+            elif self.cursor_locked():
+                res['failure'] = {'kind': 'aim_failed', 'msg': 'the game locks the cursor (relative-mouse aiming) and '
+                                  'no relative aim profile exists yet: run -AimScan first (nothing was fired)'}
+                self.d.disarm()
+                return res
+            if aimer is None and not aim_sources:
+                res['aim_method'] = 'sighting'
                 sres = self._sight(res)
                 if sres is None:
                     return res
@@ -307,6 +341,7 @@ class Runner:
                 reasons = self.wait_ready(sc.support)
                 if reasons:
                     res['failure'] = {'kind': 'not_ready', 'msg': 'after sighting: ' + '; '.join(reasons)}
+                    self.d.disarm()
                     return res
         name = self._new_session_name(sc.id)
         path = os.path.join(self.cfg.capture_root, name)
@@ -319,7 +354,7 @@ class Runner:
         ctx = Ctx(self.d, self.b, log=writer.log)
         ctx.row = self.last_row
         ctx.aimer, ctx.aim_sources = aimer, aim_sources
-        if aimer is not None:
+        if getattr(aimer, 'sighting', None):
             writer.log(dict(event='sighting_used', P=aimer.P, **aimer.sighting))
         issues = []
         fatal = None
@@ -340,6 +375,7 @@ class Runner:
             fatal = e
         finally:
             self.d.release_all()
+            self.d.disarm()
             writer.stop_segment()
         res['duration_s'] = round(time.time() - t0, 2)
         res['frames'] = ctx.frames
@@ -355,6 +391,8 @@ class Runner:
             res['status'], res['failure'] = 'fail', {'kind': 'capture_invalid', 'msg': sess['summary']}
         if sc.id.startswith('M2') and sess['usable']:
             res['observations']['walk_metrics'] = walk_metrics(path)
+        if sc.space and res.get('ground_profile'):
+            res['ground_scan_check'] = ground_scan_check(res['ground_profile'], path)
         writer.close(res)
         if res['status'] != 'pass':
             res['preserved_at'] = self._preserve_failed(path)
@@ -366,6 +404,52 @@ class Runner:
             self.results.append(res)
             raise fatal
         return res
+
+    def _ground_gate(self, sc, res):
+        """Setup safety gate before a walk. Returns a finished result (skipped) or None to go ahead.
+        'estimate' is enforced; 'ambiguous' / 'unavailable' skip unless -TrustGround (diagnostic mode)."""
+        prof = self.p.ground_profile(self.last_row)
+        res['ground_profile'] = prof
+        conf = prof.get('confidence')
+        if conf == 'estimate':
+            short = {d: (prof[d]['clear_px'], need, prof[d].get('end')) for d, need in sc.space.items()
+                     if prof.get(d) and prof[d]['clear_px'] < need}
+            if short:
+                res['status'] = 'skipped'
+                res['failure'] = {'kind': 'insufficient_space', 'msg': 'nothing sent: estimated clear ground %s '
+                                  '(have px, need px, end); move to a longer flat area, or check the estimate with '
+                                  '-GroundScan' % short}
+                return res
+            return None
+        if self.cfg.trust_ground:
+            res['ground_gate'] = 'OVERRIDDEN by -TrustGround (diagnostic): scan %s: %s' % (conf, prof.get('reason'))
+            self.ui.say('     DIAGNOSTIC MODE: ground scan %s (%s); walking anyway, leaving the ground stops the '
+                        'scenario' % (conf, prof.get('reason')))
+            return None
+        res['status'] = 'skipped'
+        res['failure'] = {'kind': 'ground_%s' % conf, 'msg': 'nothing sent: the ground scan is %s (%s). Run '
+                          '-GroundScan here to see why, or -TrustGround to walk anyway (diagnostic mode)'
+                          % (conf, prof.get('reason'))}
+        return res
+
+    def ground_scan(self, compare_session=None):
+        """Diagnostic, sends nothing: the ground model around the spider, the corridor solids, and optionally a
+        comparison with a capture made at the same spot (where the spider really stood)."""
+        reasons = self.wait_ready(None, timeout=120)
+        row = self.last_row
+        if not S.body(row):
+            return {'error': 'no player body: ' + '; '.join(reasons)}
+        solids = self.p.ground_solids()
+        out = {'profile': G.ground_profile(solids, S.body(row)['pos_px'], S.pvars(row).get('ground')),
+               'corridor': G.corridor_table(solids, S.body(row)['pos_px'])}
+        if compare_session:
+            sys.path.insert(0, os.path.join(HERE, '..', '..', '..', 'tests'))
+            import capture_lib as cap
+            sess = cap.Session(compare_session)
+            out['compare'] = {'session': sess.name, 'rooms': sorted({f.get('room') for f in sess.frames}),
+                              'room_now': row.get('room'),
+                              'instances': G.compare_with_capture(solids, sess.frames)}
+        return out
 
     def _sight(self, res):
         """Pre-recording sighting shots (unrecorded; logged in the result). Returns a SightedAim or None."""
@@ -381,6 +465,7 @@ class Runner:
             self.drive(gen(), ctx, max_frames=2400)
         except ScenarioFailure as e:
             self.d.release_all()
+            self.d.disarm()
             res['failure'] = {'kind': e.kind, 'msg': e.msg}
             res['sighting'] = (ctx.obs.get('sighting') or [None])[-1]
             return None
@@ -397,8 +482,13 @@ class Runner:
         end of every hold record the requested and actual cursor, Windows' cursor state and EVERY numeric instance
         variable of oIO and oPlayer. Writes aimscan.jsonl + aimscan_report.json and returns the analysis."""
         self.ensure_ready('any', 'aim scan')
+        self.arm('aim scan (cursor moves only)')
         w, h = self.d.client_size()
-        pts = [(w * fx, h * fy) for fy in (0.2, 0.4, 0.6, 0.8) for fx in (0.15, 0.35, 0.5, 0.65, 0.85)]
+        # small symmetric grid around the current cursor: classifies the cursor (free / locked) and finds
+        # absolute followers, while summing to zero motion if the game reads it as deltas (locked cursor)
+        c0 = self.d.cursor_client() or (w / 2.0, h / 2.0)
+        c0 = (max(60, min(w - 60, c0[0])), max(60, min(h - 60, c0[1])))
+        pts = [(c0[0] + dx, c0[1] + dy) for dy in (-40, 0, 40) for dx in (-40, 0, 40)]
         rel = [(40, 0), (0, 40), (-40, 0), (0, -40)] * 2
         os.makedirs(out_dir, exist_ok=True)
         samples = []
@@ -415,30 +505,83 @@ class Runner:
             for p in pts:
                 self.d.move_mouse(*p)
                 record(list(p), 'absolute')
-            self.d.move_mouse(w / 2.0, h / 2.0)
-            record([w / 2.0, h / 2.0], 'absolute')
+            self.d.move_mouse(*c0)
+            record(list(c0), 'absolute')
             for dx, dy in rel:
                 self.d.move_mouse_relative(dx, dy)
                 record(None, 'relative')
+            # delta impulses: one event, then every frame recorded (gain, integration, lag)
+            impulses = []
+            deltas = [(20, 0), (-20, 0), (60, 0), (-60, 0), (0, 20), (0, -20), (0, 60), (0, -60)]
+            for method in ('abs', 'rel'):
+                for dx, dy in deltas:
+                    for _ in range(4):
+                        self.frame()
+                    series = [self._aim_vars()]
+                    c = self.d.cursor_client() or (w / 2.0, h / 2.0)
+                    if method == 'abs':
+                        self.d.move_mouse(c[0] + dx, c[1] + dy)
+                    else:
+                        self.d.move_mouse_relative(dx, dy)
+                    for _ in range(8):
+                        self.frame()
+                        series.append(self._aim_vars())
+                    impulses.append({'method': method, 'd': (dx, dy), 'series': series,
+                                     'body': (S.body(self.last_row) or {}).get('pos_px')})
+                    f.write(json.dumps({'phase': 'impulse', 'method': method, 'd': [dx, dy], 'series': series},
+                                       default=str) + '\n')
         analysis = A.analyze_aimscan(samples)
+        resp = A.analyze_impulses(impulses)
+        rel_checks = A.relations(impulses[-1]['series'][-1], impulses[-1]['body']) if impulses else {}
+        relative = A.choose_relative_profile(resp, rel_checks)
+        analysis['impulse_response'] = {m: {k: v for k, v in r.items() if k != 'rejected'} for m, r in resp.items()
+                                        if m != 'rejected'}
+        analysis['impulse_rejected_pairs'] = resp.get('rejected')
+        analysis['aimdir_relations'] = rel_checks
+        analysis['relative_profile'] = relative
         analysis['cursor_state_at_end'] = self.d.cursor_state()
         analysis['hooks'] = getattr(self.d, 'hook_ok', None)
         analysis['takeover_monitor_counts'] = getattr(getattr(self.d, 'monitor', None), 'counts', None)
         with open(os.path.join(out_dir, 'aimscan_report.json'), 'w') as f:
             json.dump(analysis, f, indent=1, default=str)
-        if analysis.get('feedback_pair'):
+        prof = None
+        if relative and analysis.get('cursor', {}).get('mode') == 'recentred_or_locked':
+            prof = dict(relative, measured=stamp(), lock_point=analysis['cursor'].get('fixed_point'))
+            analysis['recommendation'] = ('relative aim: %s via %s impulses (gain %s, kind %s%s); saved as the aim '
+                                          'profile; shots are still direction-checked'
+                                          % ('/'.join(prof['pair']), prof['method'], prof['gain'], prof['kind'],
+                                             ', verified against io.aimdir' if prof['kind_verified_by_aimdir'] else ''))
+        elif analysis.get('feedback_pair'):
             prof = {'feedback_pair': analysis['feedback_pair'], 'measured': stamp(),
-                    'followers': analysis['followers'][:6], 'note': 'from -AimScan; shots are still direction-checked'}
+                    'followers': analysis['followers'][:6]}
+        elif analysis.get('cursor', {}).get('mode') == 'recentred_or_locked':
+            analysis['recommendation'] = ('the cursor is locked but no variable pair responded linearly to delta '
+                                          'impulses: see impulse_response / impulse_rejected_pairs in the report')
+        if prof:
+            prof['note'] = 'from -AimScan; every real shot is still direction-checked'
+            if os.path.exists(self.cfg.aim_profile_file):
+                os.replace(self.cfg.aim_profile_file, self.cfg.aim_profile_file + '.%s.bak' % stamp())
             with open(self.cfg.aim_profile_file, 'w') as f:
                 json.dump(prof, f, indent=1)
             self.aim_profile = prof
+        self.d.disarm()
         return analysis
+
+    def _aim_vars(self):
+        return dict([('player.' + k, v) for k, v in self.p.all_vars('player').items()] +
+                    [('io.' + k, v) for k, v in self.p.all_vars('io').items()])
 
     def aim_sight(self):
         """Diagnostic: only the sighting (3 grapple taps into the floor). Returns the sighting result."""
         self.ensure_ready('ground', 'aim sighting')
+        if self.cursor_locked():
+            return {'ok': False, 'P': None, 'sighting': None, 'failure': {
+                'kind': 'aim_failed', 'msg': 'the game locks the cursor: sighting needs absolute aiming; use the '
+                                             'relative aim profile from -AimScan (nothing was fired)'}}
+        self.arm('aim sighting')
         res = {}
         aimer = self._sight(res)
+        self.d.disarm()
         return {'ok': aimer is not None, 'P': aimer.P if aimer else None, 'sighting': res.get('sighting'),
                 'failure': res.get('failure')}
 
@@ -520,6 +663,32 @@ def summarise_inputs(ctx):
     if ctx.holds:
         dev = [h['observed_frames'] - h['requested_frames'] for h in ctx.holds]
         out['hold_deviation_frames'] = {'min': min(dev), 'max': max(dev)}
+    return out
+
+
+def ground_scan_check(profile, path):
+    """After a walk: predicted clear distance vs. how far the spider really went on support (validates the
+    ground scan over time). Distances in px from the start position."""
+    sys.path.insert(0, os.path.join(HERE, '..', '..', '..', 'tests'))
+    import capture_lib as cap
+    try:
+        s = cap.Session(path)
+    except Exception as e:
+        return {'error': repr(e)}
+    fr = [r for r in s.frames if (r.get('player') or {}).get('body')]
+    if not fr:
+        return {'error': 'no player frames'}
+    x0 = fr[0]['player']['body']['pos_px'][0]
+    on = [r['player']['body']['pos_px'][0] - x0 for r in fr if cap.support(r) == 'ground']
+    lost = next((r['player']['body']['pos_px'][0] - x0 for a, r in zip(fr, fr[1:])
+                 if cap.support(a) == 'ground' and cap.support(r) is None), None)
+    out = {'confidence': profile.get('confidence'), 'actual_max_right_px': round(max(on), 1) if on else None,
+           'actual_max_left_px': round(-min(on), 1) if on else None, 'first_support_loss_at_px':
+           None if lost is None else round(lost, 1)}
+    for d in ('right', 'left'):
+        if profile.get(d):
+            out['predicted_%s_px' % d] = profile[d]['clear_px']
+            out['predicted_%s_end' % d] = profile[d].get('end')
     return out
 
 

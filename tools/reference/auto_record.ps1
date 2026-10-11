@@ -19,6 +19,7 @@
   powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -List
   powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -AimScan
   powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -AimSight
+  powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -GroundScan -CompareCapture <capture dir>
   powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -Suite M2
   powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -All
   powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -Suite M2,W1
@@ -32,7 +33,12 @@
   -List       list suites, scenarios, the keys each needs and the spot each needs.
   -AimScan    diagnostic, NO clicks or keys: sweeps the cursor and records every oIO/oPlayer variable and the
               actual cursor position; reports what follows the mouse and whether the game moves the cursor.
-  -AimSight   diagnostic: 3 short grapple taps into the floor; measures where the aim origin is on screen.
+  -AimSight   diagnostic: 3 short grapple taps into the floor; measures where the aim origin is on screen
+              (only for games with a free cursor; Webbed locks it, so use the -AimScan profile).
+              -AimScan also measures the game's own relative aim (delta impulses) and saves the aim profile.
+  -GroundScan diagnostic, sends nothing: ground model around the spider. -CompareCapture <dir> checks it
+              against where the spider really stood in an earlier capture from the same room.
+  -TrustGround  DIAGNOSTIC MODE: walk although the ground scan is ambiguous/unavailable (marked OVERRIDDEN).
   -All        suites M2 (walk), W1 (grapple shot/attach), W2 (swing/release), W4 (retract probe, pull),
               W3 (permanent webs). Prefer running one suite at a time first.
   -Suite / -Scenario   run a subset.
@@ -52,6 +58,9 @@ param(
     [switch]$List,
     [switch]$AimScan,
     [switch]$AimSight,
+    [switch]$GroundScan,
+    [string]$CompareCapture,
+    [switch]$TrustGround,
     [switch]$SelfTest,
     [switch]$NoPrompt,
     [switch]$NoTests,
@@ -92,8 +101,11 @@ if ($NoTests) { $argsList += '--no-tests' }
 if ($NoMouseFailsafe) { $argsList += '--no-mouse-failsafe' }
 if ($AimScan) { $argsList += '--aim-scan' }
 if ($AimSight) { $argsList += '--aim-sight' }
+if ($GroundScan) { $argsList += '--ground-scan' }
+if ($CompareCapture) { $argsList += '--compare-capture'; $argsList += $CompareCapture }
+if ($TrustGround) { $argsList += '--trust-ground' }
 $recording = [bool]($All -or $Suite -or $Scenario)
-if (-not ($recording -or $Check -or $Calibrate -or $CalibrateActions -or $AimScan -or $AimSight)) {
+if (-not ($recording -or $Check -or $Calibrate -or $CalibrateActions -or $AimScan -or $AimSight -or $GroundScan)) {
     throw 'Pass -All, -Suite, -Scenario, -Check, -Calibrate, -CalibrateActions, -AimScan, -AimSight, -List or -SelfTest.'
 }
 

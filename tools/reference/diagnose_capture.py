@@ -89,6 +89,21 @@ def main():
     print('support timeline (support, first frame, last frame, frames):')
     for t in tl[:80]:
         print('  %-9s %7d .. %7d  (%d)' % tuple(t))
+    walked = {}
+    for r in fr:
+        p = r.get('player') or {}
+        b, v = p.get('body'), p.get('vars') or {}
+        gid = v.get('ground')
+        if b and gid not in (None, -4):
+            e = walked.setdefault(gid, [b['pos_px'][0], b['pos_px'][0], 0, b['pos_px'][1] + 11, set()])
+            e[0], e[1] = min(e[0], b['pos_px'][0]), max(e[1], b['pos_px'][0])
+            e[2] += 1
+            e[4].add(v.get('ground_angle'))
+    print('ground instances walked on (id: x range, frames, foot y at first contact, ground_angle values):')
+    for gid, e in sorted(walked.items(), key=lambda kv: kv[1][0]):
+        print('  %-8s x %8.1f .. %8.1f  frames %-5d foot_y %8.1f  angles %s'
+              % (gid, e[0], e[1], e[2], e[3], sorted(a for a in e[4] if a is not None)[:4]))
+    print('  (compare with: auto_record.ps1 -GroundScan -CompareCapture "%s", standing at the same spot)' % a.session)
     losses = [t for i, t in enumerate(tl) if i and t[0] in ('air', 'no-player') and tl[i - 1][0] in ('ground', 'web')]
     print('losses of support: %d' % len(losses))
     by_frame = {r['frame']: r for r in fr}

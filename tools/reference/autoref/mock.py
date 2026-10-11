@@ -12,6 +12,7 @@ import math
 import os
 import sys
 
+from . import groundscan as G
 from .driver import InputDriver
 from .inputhook import EMERGENCY_VKS, WM_MOUSEMOVE, TakeoverMonitor
 from .provider import GameLost
@@ -51,6 +52,8 @@ class MockInputDriver(InputDriver):
                 self.monitor.on_mouse(0x0201, 0, 0, False, False)
             elif kind == 'key':
                 self.monitor.on_key(0x41, True, False, False)
+            elif kind == 'esc':
+                self.monitor.on_key(0x1B, True, False, False)
             elif kind == 'f12':
                 self.monitor.on_key(EMERGENCY_VKS[0], True, False, False)
 
@@ -72,7 +75,7 @@ class MockInputDriver(InputDriver):
 
     def move_mouse_relative(self, dx, dy):
         if self.game.mouse_relative:
-            self.game.virtual_aim = (self.game.virtual_aim[0] + dx, self.game.virtual_aim[1] + dy)
+            self.game.pending_rel = (self.game.pending_rel[0] + dx, self.game.pending_rel[1] + dy)
         else:
             self.move_mouse(self.cursor[0] + dx, self.cursor[1] + dy)
 
@@ -115,7 +118,7 @@ class MockGame:
                  freeze_at=None, respawn_at=None, release_mode='button-up', view_scale=0.75, start_frame=50000,
                  io_absent=(), weave_reels_in=False, jitter_pxps=0.0, cursor_recenters=False,
                  crosshair_static=False, mouse_relative=False, floor_attaches=True, scan_unavailable=False,
-                 gh_reset_on_attach=True, camera_offset=(0.0, 0.0)):
+                 gh_reset_on_attach=True, camera_offset=(0.0, 0.0), extra_solids=(), menu_frames=0):
         self.keys = dict(bindings_keys or {'right': 'D', 'left': 'A', 'jump': 'SPACE', 'grapple': 'LMB',
                                            'weave': 'RMB', 'retract': 'SHIFT'})
         self.ground_y, self.ground_x, self.ceiling_y, self.wall_x = ground_y, ground_x, ceiling_y, wall_x
@@ -129,11 +132,16 @@ class MockGame:
         self.cursor_recenters = cursor_recenters  # the game warps the cursor to the window centre every frame
         self.crosshair_static = crosshair_static  # crosshair_tx/ty never follow the cursor (live finding)
         self.mouse_relative = mouse_relative    # aim moves only with relative mouse motion (absolute ignored)
-        self.virtual_aim = (100.0, -60.0)       # relative-mode aim offset from the player (room px)
+        # relative mode (live 2026-10-11: cursor locked at the centre, aim from deltas): a virtual cursor in
+        # client px, moved by abs-move deltas (position - lock point) and relative moves, clamped to the window
+        self.vcur = (640.0 + 133.0, 360.0 - 80.0)
+        self.pending_rel = (0.0, 0.0)
         self.floor_attaches = floor_attaches    # a shot reaching the floor attaches there
         self.scan_unavailable = scan_unavailable
         self.gh_reset_on_attach = gh_reset_on_attach   # gh/gv read 0 once the shot is gone (unknown in the game)
         self.camera_offset = camera_offset      # player's screen position minus the window centre (client px)
+        self.extra_solids = list(extra_solids)  # groundscan solids added to the floor (tests: unknown shapes etc.)
+        self.menu_frames = menu_frames          # a pause menu is open for the first N frames
         self.shot_vars = {'gh': 0.0, 'gv': 0.0, 'sx': None, 'sy': None, 'gx': None, 'gy': None}
         self.cross0 = None
         self.view_scale = view_scale
@@ -176,12 +184,21 @@ class MockGame:
         v.update(mock_unrelated_counter=self.index % 7, mock_constant=3.0)
         return {k: x for k, x in v.items() if isinstance(x, (int, float))}
 
+    SPR_GROUND = {'name': 'sGround', 'w': 32, 'h': 32, 'ox': 16, 'oy': 16}
+
+    def ground_solids(self):
+        x0, x1 = max(self.ground_x[0], self.x - 5000), min(self.ground_x[1], self.x + 5000)
+        floor = G.make_solid(9001, 'oGround', (x0 + x1) / 2.0, self.ground_y + 16, (x1 - x0) / 32.0, 1.0, 0.0,
+                             self.SPR_GROUND, 1)
+        return [floor] + self.extra_solids
+
     def ground_profile(self, row):
         if self.scan_unavailable:
             return {'confidence': 'unavailable', 'reason': 'mock: scan unavailable'}
-        return {'confidence': 'estimate',
-                'right': {'clear_px': round(self.ground_x[1] - self.x, 1), 'end': 'edge'},
-                'left': {'clear_px': round(self.x - self.ground_x[0], 1), 'end': 'edge'}}
+        return G.ground_profile(self.ground_solids(), (self.x, self.y), 9001)
+
+    def pause_state(self):
+        return {'menus': ['oSettingsMenu'] if self.index <= self.menu_frames else [], 'paused': {}}
 
     def idle(self, writer=None):
         pass
@@ -217,8 +234,23 @@ class MockGame:
         mx, my = self.driver.aim_cursor if self.driver else (640, 360)
         io['aimx'], io['aimy'] = self._room(mx, my)
         if self.mouse_relative:
-            io['aimx'], io['aimy'] = self.x + self.virtual_aim[0], self.y + self.virtual_aim[1]
-        self.aim_point = (io['aimx'], io['aimy'])
+            d = self.driver
+            cx, cy = (d.client[0] / 2.0, d.client[1] / 2.0) if d else (640.0, 360.0)
+            ax, ay = d.aim_cursor if d else (cx, cy)
+            vx = self.vcur[0] + (ax - cx) + self.pending_rel[0]
+            vy = self.vcur[1] + (ay - cy) + self.pending_rel[1]
+            self.vcur = (max(0.0, min(2 * cx, vx)), max(0.0, min(2 * cy, vy)))
+            self.pending_rel = (0.0, 0.0)
+            if d:
+                d.aim_cursor = d.cursor = (cx, cy)          # the game recentres the cursor after reading it
+            rx, ry = self._room(*self.vcur)
+            io.pop('aimx', None)
+            io.pop('aimy', None)
+            io.update(mx=rx, my=ry, gmx=self.vcur[0], gmy=self.vcur[1],
+                      aimdir=wm.point_direction(self.x, self.y, rx, ry))
+            self.aim_point = (rx, ry)
+        else:
+            self.aim_point = (io['aimx'], io['aimy'])
         for k in self.io_absent:
             io.pop(k, None)
         return io
@@ -357,6 +389,11 @@ class MockGame:
         self.new_events = []
         if has_player:
             ctx, cty = getattr(self, 'aim_point', self._room(640, 360))
+            if self.mouse_relative:
+                ad = math.radians(wm.point_direction(self.x, self.y, ctx, cty))
+                v_rel = {'aimx': ctx, 'aimy': cty, 'abx': self.x - 6 * math.cos(ad), 'aby': self.y + 6 * math.sin(ad)}
+            else:
+                v_rel = {}
             if self.crosshair_static:
                 self.cross0 = self.cross0 or (ctx, cty)
                 ctx, cty = self.cross0
@@ -369,6 +406,7 @@ class MockGame:
                  'webshot_node': s['id'] if s else NOONE, 'crosshair_tx': ctx, 'crosshair_ty': cty,
                  'gx': self.shot_vars['gx'], 'gy': self.shot_vars['gy'], 'sx': self.shot_vars['sx'],
                  'sy': self.shot_vars['sy'], 'gh': self.shot_vars['gh'], 'gv': self.shot_vars['gv']}
+            v.update(v_rel)
             row['player'] = {'id': self.pid, 'xy': [self.x, self.y], 'image_angle': 0.0, 'vars': v,
                              'body': {'pos_m': [self.x * sc, self.y * sc], 'vel_mps': [self.vx * sc, self.vy * sc],
                                       'angle_rad': 0.0, 'angvel_rps': 0.0, 'pos_px': [self.x, self.y],

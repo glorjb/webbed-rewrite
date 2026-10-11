@@ -255,6 +255,75 @@ class SightedAim:
         return angle_deg
 
 
+class RelativeAim:
+    """Aim through the game's own relative-mouse aim state (profile measured by -AimScan, aim.choose_relative_profile).
+    The cursor is locked by the game, so the runner sends delta impulses: an absolute move to 'lock point + d'
+    (method 'abs', exact pixels) or a relative move (method 'rel'), then re-reads the aim pair after the measured
+    lag, until the pair points at the wanted direction from the player (kind 'point') or is that direction
+    (kind 'vector'). The real shot is direction-checked afterwards as always."""
+    TOL_DEG = 1.5
+
+    def __init__(self, profile):
+        self.p = profile
+        (a, b), (c, d) = profile['gain']                    # room units per screen px: [[dX/dx, dX/dy], [dY/dx, dY/dy]]
+        det = a * d - b * c
+        if abs(det) < 1e-12:
+            raise ScenarioFailure('aim_failed', 'relative aim profile has a singular gain matrix')
+        self.inv = (d / det, -b / det, -c / det, a / det)
+
+    def read(self, ctx):
+        vals = []
+        for full in self.p['pair']:
+            scope, name = full.split('.', 1)
+            v = (S.pvars(ctx.row) if scope == 'player' else S.io(ctx.row)).get(name)
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                raise ScenarioFailure('aim_failed', 'relative aim variable %s is not readable now' % full)
+            vals.append(v)
+        return vals
+
+    def impulse(self, ctx, dx, dy):
+        w, h = ctx.driver.client_size()
+        lim = max(20.0, min(w, h) / 2.0 - 20.0) if self.p['method'] == 'abs' else 300.0
+        dx, dy = max(-lim, min(lim, dx)), max(-lim, min(lim, dy))
+        if self.p['method'] == 'abs':
+            c = ctx.driver.cursor_client() or (w / 2.0, h / 2.0)   # the game's lock point
+            ctx.driver.move_mouse(c[0] + dx, c[1] + dy)
+        else:
+            ctx.driver.move_mouse_relative(dx, dy)
+        return dx, dy
+
+    def aim(self, ctx, angle_deg, max_iter=14):
+        point = self.p.get('kind', 'point') == 'point'
+        a = err = None
+        for it in range(max_iter + 1):
+            x, y = self.read(ctx)
+            ox, oy = S.body(ctx.row)['pos_px'] if point else (0.0, 0.0)
+            dist = math.hypot(x - ox, y - oy)
+            a = math.degrees(math.atan2(-(y - oy), x - ox)) % 360 if dist > 1e-9 else None
+            err = A.angle_diff(a, angle_deg) if a is not None else 180.0
+            if abs(err) <= self.TOL_DEG and (not point or dist >= 40):
+                break
+            if it == max_iter:
+                break
+            R = min(max(dist, 120.0), 250.0) if point else max(dist, 1e-3)
+            tx = ox + R * math.cos(math.radians(angle_deg))
+            ty = oy - R * math.sin(math.radians(angle_deg))
+            dX, dY = tx - x, ty - y
+            sx = self.inv[0] * dX + self.inv[1] * dY
+            sy = self.inv[2] * dX + self.inv[3] * dY
+            self.impulse(ctx, sx, sy)
+            yield from ctx.wait(int(self.p.get('lag_frames') or 1) + 2)
+        ctx.log({'event': 'aim', 'method': 'relative', 'target_deg': angle_deg,
+                 'achieved_deg': None if a is None else round(a, 2), 'error_deg': round(err, 2),
+                 'pair': self.p['pair'], 'iterations': it})
+        ctx.note('aim', {'target_deg': angle_deg, 'method': 'relative', 'pair': '/'.join(self.p['pair']),
+                         'achieved_deg': None if a is None else round(a, 2), 'iterations': it})
+        if abs(err) > self.TOL_DEG:
+            raise ScenarioFailure('aim_failed', 'relative aim did not converge on %.0f deg (best %s deg) using %s'
+                                  % (angle_deg, None if a is None else round(a, 1), '/'.join(self.p['pair'])))
+        return a
+
+
 def check_shot_direction(ctx, intended, what='shot'):
     """After a shot fired: its launch vector (player gh, gv) must point within AIM_CHECK_TOL_DEG of `intended`."""
     sd = A.shot_direction(S.pvars(ctx.row))

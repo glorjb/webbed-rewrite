@@ -199,3 +199,128 @@ def analyze_aimscan(samples, r2_min=0.98):
         out['recommendation'] = ('no instance variable of oIO / oPlayer follows the cursor: aim with sighting shots '
                                  '(-AimSight / automatic before each web scenario)')
     return out
+
+
+# ------------------------------------------------------------------------------------------ relative (locked-cursor) aim
+# Live finding (2026-10-11, -AimScan): the game recentres the cursor every frame ("recentred_or_locked" at the
+# window centre) and reads mouse DELTAS. Variables that changed with relative motion: io.aimdir, io.gmx, io.gmy,
+# io.mx, io.my, player.abx, player.aby, player.aimx, player.aimy. Their meaning is not decoded; it is MEASURED:
+# single delta impulses are sent and each variable's response is fitted (gain per pixel, integrator or not,
+# lag). An absolute move to "lock point + (dx, dy)" gives the game an exact pixel delta (no pointer acceleration);
+# a relative SendInput move is also measured, since games reading raw input see only that one.
+PAIR_PRIORITY = ('aimx', 'mx', 'gmx', 'abx')
+
+
+def fit_gain(rows):
+    """rows: [(dx, dy, dv)]. Least squares dv = gx*dx + gy*dy (no intercept). Returns (gx, gy, r2) or None."""
+    sxx = sum(r[0] * r[0] for r in rows)
+    syy = sum(r[1] * r[1] for r in rows)
+    sxy = sum(r[0] * r[1] for r in rows)
+    sxv = sum(r[0] * r[2] for r in rows)
+    syv = sum(r[1] * r[2] for r in rows)
+    det = sxx * syy - sxy * sxy
+    if abs(det) < 1e-9:
+        return None
+    gx = (syy * sxv - sxy * syv) / det
+    gy = (sxx * syv - sxy * sxv) / det
+    ss_tot = sum(r[2] * r[2] for r in rows)
+    ss_res = sum((r[2] - gx * r[0] - gy * r[1]) ** 2 for r in rows)
+    return gx, gy, (1 - ss_res / ss_tot) if ss_tot > 1e-12 else 0.0
+
+
+def analyze_impulses(impulses, r2_min=0.98):
+    """impulses: [{'method': 'abs'|'rel', 'd': (dx, dy), 'series': [{var: value} per frame, frame 0 = before]}].
+    Per method and variable: gain (per screen px), R^2, persistence (integrator: the change stays) and lag."""
+    out = {}
+    for method in sorted({i['method'] for i in impulses}):
+        imp = [i for i in impulses if i['method'] == method and len(i['series']) > 3]
+        names = sorted({k for i in imp for k in i['series'][0]})
+        res = {}
+        for k in names:
+            rows, persist, lags = [], [], []
+            for i in imp:
+                s = [f.get(k) for f in i['series']]
+                if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in s):
+                    break
+                dv_end = s[-1] - s[0]
+                mid = s[len(s) // 2] - s[0]
+                rows.append((i['d'][0], i['d'][1], dv_end))
+                if abs(dv_end) > 1e-9 or abs(mid) > 1e-9:
+                    persist.append(abs(dv_end - mid) <= 0.05 * max(abs(dv_end), abs(mid), 1e-9))
+                    lags.append(next((n for n, v in enumerate(s) if abs(v - s[0]) > 1e-9), None))
+            else:
+                if not rows or all(abs(r[2]) < 1e-9 for r in rows):
+                    continue
+                f = fit_gain(rows)
+                if f is None:
+                    continue
+                res[k] = {'gx': f[0], 'gy': f[1], 'r2': round(f[2], 5), 'integrator': bool(persist) and all(persist),
+                          'lag_frames': max((x for x in lags if x is not None), default=None)}
+        out[method] = res
+    return out
+
+
+def _pairs(resp):
+    """(x_var, y_var) candidates: same scope and prefix, names ending in x / y, e.g. player.aimx / player.aimy."""
+    out = []
+    for k in resp:
+        if k.endswith('x') and k[:-1] + 'y' in resp:
+            out.append((k, k[:-1] + 'y'))
+    return out
+
+
+def relations(final_vars, body_pos):
+    """At one moment: does io.aimdir equal the direction from the player to a candidate pair (as a point) or of
+    the pair itself (as a vector)? Returns {pair: {'point_err_deg', 'vector_err_deg'}}."""
+    out = {}
+    ad = final_vars.get('io.aimdir')
+    for xk, yk in _pairs({k: 1 for k in final_vars}):
+        x, y = final_vars.get(xk), final_vars.get(yk)
+        if not _num(x, y):
+            continue
+        r = {}
+        if _num(ad) and body_pos:
+            r['point_err_deg'] = abs(angle_diff(math.degrees(math.atan2(-(y - body_pos[1]), x - body_pos[0])) % 360, ad))
+            r['vector_err_deg'] = abs(angle_diff(math.degrees(math.atan2(-y, x)) % 360, ad))
+        out['%s/%s' % (xk, yk)] = r
+    return out
+
+
+def choose_relative_profile(analysis, rel_checks, r2_min=0.98):
+    """Pick the best (method, pair): both axes linear (R^2), integrating, mostly decoupled, and if io.aimdir is
+    available, consistent with it. Returns a profile dict or None (with the reasons in analysis['rejected'])."""
+    best, rejected = None, []
+    for method, resp in analysis.items():
+        for xk, yk in _pairs(resp):
+            ax, ay = resp[xk], resp[yk]
+            why = []
+            if min(ax['r2'], ay['r2']) < r2_min:
+                why.append('nonlinear (R^2 %.3f / %.3f)' % (ax['r2'], ay['r2']))
+            if not (ax['integrator'] and ay['integrator']):
+                why.append('does not keep its value after an impulse')
+            if abs(ax['gx']) < 1e-6 or abs(ay['gy']) < 1e-6:
+                why.append('no response on its own axis')
+            elif abs(ax['gy']) > 0.2 * abs(ax['gx']) or abs(ay['gx']) > 0.2 * abs(ay['gy']):
+                why.append('axes coupled')
+            rc = rel_checks.get('%s/%s' % (xk, yk), {})
+            kind = None
+            if rc:
+                kind = 'point' if rc.get('point_err_deg', 999) <= rc.get('vector_err_deg', 999) else 'vector'
+                if min(rc.get('point_err_deg', 999), rc.get('vector_err_deg', 999)) > 3.0:
+                    why.append('direction disagrees with io.aimdir (%s)' % rc)
+            if why:
+                rejected.append({'method': method, 'pair': [xk, yk], 'why': why})
+                continue
+            name = xk.split('.', 1)[1]
+            prio = PAIR_PRIORITY.index(name) if name in PAIR_PRIORITY else len(PAIR_PRIORITY)
+            score = (bool(rc), -prio, min(ax['r2'], ay['r2']), method == 'abs')
+            cand = {'mode': 'relative', 'method': method, 'pair': [xk, yk], 'kind': kind or 'point',
+                    'kind_verified_by_aimdir': bool(rc),
+                    'gain': [[ax['gx'], ax['gy']], [ay['gx'], ay['gy']]],
+                    'lag_frames': max(ax['lag_frames'] or 1, ay['lag_frames'] or 1), 'score': score}
+            if best is None or score > best['score']:
+                best = cand
+    analysis['rejected'] = rejected
+    if best:
+        best.pop('score')
+    return best

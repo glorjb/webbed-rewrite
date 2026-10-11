@@ -69,12 +69,30 @@ Your confirmed key bindings live in `DesktopPlaygroundLocal\auto_bindings.local.
 - `-CalibrateActions retract` re-tests only the actions you name and keeps every other confirmed key.
 - Every save first backs up the previous file as `auto_bindings.local.<time>.bak.json`.
 
-**Aiming (sighting).** Before each scenario that aims, the runner fires 3 short grapple taps into the floor
+**Aiming in Webbed (relative mouse).** Webbed locks the cursor at the window centre and aims from mouse movement.
+- `-AimScan` measures the game's own aim variables with small cursor impulses, and saves
+  `DesktopPlaygroundLocal\aim_profile.local.json`. It fires nothing.
+- Every aimed scenario then steers that aim state, and checks each real shot's direction.
+- Without a profile, aimed scenarios stop immediately with "run -AimScan first", and fire nothing.
+
+**Ground check (v2).** The scan follows the real (rotated) surfaces of the solid pieces and walks over steps of up
+to 11 px. When a nearby piece has a collision shape it can't model, the scan is *ambiguous*.
+- An ambiguous scan skips the walk, and the message says so.
+- `-GroundScan` shows the model. `-GroundScan -CompareCapture <old capture dir>` checks it, piece by piece,
+  against where the spider really stood in that capture.
+- `-TrustGround` walks anyway. It's a marked diagnostic mode: leaving the ground still stops the scenario, and
+  the result records predicted against actual distance.
+
+**Aiming (sighting, free-cursor games only).** Before each scenario that aims, the runner fires 3 short grapple taps into the floor
 beside the spider. Nothing is recorded during sighting.
 - Each shot's launch direction is recorded, and the shots' lines must meet at one screen point: the aim origin.
 - The real shot is then aimed from that point, and its actual direction is checked: within 5°, or the attempt
   fails with the measured angles.
 - If the shot directions don't change with the cursor, sighting fails cleanly and asks for `-AimScan`.
+
+**Takeover detection is armed only after** the game has focus, the spider is ready, no menu is open and the game
+isn't paused. So pressing Escape to unpause, or walking the spider into place, is fine until the console prints
+`[takeover detection armed: ...]`. F12 / Pause stop the run in every phase.
 
 **Takeover detection** uses Windows low-level input hooks. Only input that did *not* come from the runner counts:
 - physical mouse movement over 6 px;

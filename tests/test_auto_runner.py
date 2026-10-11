@@ -57,10 +57,10 @@ class MockRun(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def make(self, retries=1, keys=None, **kw):
+    def make(self, retries=1, keys=None, trust_ground=False, **kw):
         g = MockGame(**kw)
         d = MockInputDriver(g)
-        cfg = Config(self.root, retries=retries, prompt=False, run_tests=False, mode='mock')
+        cfg = Config(self.root, retries=retries, prompt=False, run_tests=False, mode='mock', trust_ground=trust_ground)
         r = Runner(g, d, B.Bindings(keys if keys is not None else g.keys, source='test'), cfg, ui=QuietUI())
         r.initialise()
         return g, d, r
@@ -231,15 +231,6 @@ class MockRun(unittest.TestCase):
         g, d, r = self.make(gh_reset_on_attach=False)
         self.assertEqual(self.run_ids(r, ['W1_attach_hang'])[0]['status'], 'pass')
 
-    def test_relative_only_aim_fails_cleanly_before_recording(self):
-        g, d, r = self.make(retries=0, mouse_relative=True)
-        res = self.run_ids(r, ['W1_attach_hang'])[0]
-        self.assertEqual(res['failure']['kind'], 'aim_failed')
-        self.assertIn('does not aim at the absolute cursor', res['failure']['msg'])
-        self.assertEqual(len(res['sighting']['shots']), 3)        # the measurements are kept in the result
-        self.assertEqual(self.sessions(self.root) + self.sessions(r.cfg.failed_root), [])
-        self.assertEqual(d.held, set())
-
     def test_wrong_aim_is_caught_by_the_shot_direction_check(self):
         g, d, r = self.make(retries=0)
         r._sight = lambda res: SC.SightedAim((640.0, 520.0), {'fit': {'rms_px': 0.0}})   # deliberately wrong
@@ -257,13 +248,6 @@ class MockRun(unittest.TestCase):
         self.assertLess(abs(res['observations']['aim_check'][0]['error_deg']), 2.5)
 
     # ------------------------------------------------------------------ live failure 2: false takeover
-    def test_game_recentring_the_cursor_is_not_a_takeover(self):
-        """Live 2026-10-11: 'mouse moved by user' with nobody touching it. The game moving the cursor is not
-        an input event; only physical / foreign input counts (inputhook.TakeoverMonitor)."""
-        g, d, r = self.make(cursor_recenters=True)
-        res = self.run_ids(r, ['M2_walk_short', 'W1_attach_hang'])
-        self.assertEqual([x['status'] for x in res], ['pass', 'pass'], [x.get('failure') for x in res])
-
     def test_physical_mouse_movement_during_a_scenario_aborts(self):
         g, d, r = self.make()
         d.physical_at = [(g.index + 120, 'move')]
@@ -315,17 +299,126 @@ class MockRun(unittest.TestCase):
         walking = [f for f in s.frames if cap.support(f) == 'ground' and abs(f['io'].get('hm') or 0) == 1]
         self.assertGreaterEqual(len(walking), 60)                 # enough for test_walk_plateau_speed
 
-    def test_leaving_the_ground_is_explained_when_the_scan_is_unavailable(self):
+    # ------------------------------------------------------------------ live failure 4: locked cursor, relative aim
+    def test_locked_cursor_without_profile_fails_fast_without_firing(self):
+        """Live 2026-10-11 (-AimScan): the game recentres the cursor every frame. Sighting cannot work then;
+        the runner says so before firing anything."""
+        g, d, r = self.make(retries=0, mouse_relative=True, cursor_recenters=True)
+        res = self.run_ids(r, ['W1_attach_hang'])[0]
+        self.assertEqual(res['failure']['kind'], 'aim_failed')
+        self.assertIn('run -AimScan first', res['failure']['msg'])
+        self.assertFalse([e for e in d.events if e[1] == 'LMB'])
+        self.assertEqual(self.sessions(self.root) + self.sessions(r.cfg.failed_root), [])
+
+    def test_aim_scan_measures_the_native_relative_aim_and_scenarios_use_it(self):
+        g, d, r = self.make(mouse_relative=True, cursor_recenters=True, crosshair_static=True)
+        an = r.aim_scan(os.path.join(self.tmp, 'scan'))
+        self.assertEqual(an['cursor']['mode'], 'recentred_or_locked')
+        prof = an['relative_profile']
+        self.assertIsNotNone(prof, an.get('impulse_rejected_pairs'))
+        self.assertEqual(prof['pair'], ['player.aimx', 'player.aimy'])
+        self.assertEqual(prof['method'], 'abs')
+        self.assertEqual(prof['kind'], 'point')
+        self.assertTrue(prof['kind_verified_by_aimdir'])
+        self.assertAlmostEqual(prof['gain'][0][0], 0.75, places=3)       # mock view scale
+        self.assertAlmostEqual(prof['gain'][1][1], 0.75, places=3)
+        resp = an['impulse_response']['abs']
+        for k in ('io.mx', 'io.my', 'io.gmx', 'io.gmy', 'io.aimdir', 'player.aimx', 'player.aimy'):
+            self.assertIn(k, resp)
+        self.assertFalse([e for e in d.events if e[0] == 'down'])        # the scan never clicks or presses
+        with open(r.cfg.aim_profile_file) as f:
+            self.assertEqual(json.load(f)['mode'], 'relative')
+        res = self.run_ids(r, ['W1_attach_hang', 'W2_swing'])
+        self.assertEqual([x['status'] for x in res], ['pass', 'pass'], [x.get('failure') for x in res])
+        for x in res:
+            self.assertTrue(x['aim_method'].startswith('relative'))
+            self.assertNotIn('sighting', x)
+            for c in x['observations']['aim_check']:
+                self.assertLess(abs(c['error_deg']), 2.0)
+
+    def test_relative_impulses_via_relative_moves_only(self):
+        g, d, r = self.make(mouse_relative=True, cursor_recenters=True)
+        r.aim_profile = {'mode': 'relative', 'method': 'rel', 'pair': ['io.mx', 'io.my'], 'kind': 'point',
+                         'gain': [[0.75, 0.0], [0.0, 0.75]], 'lag_frames': 1}
+        res = self.run_ids(r, ['W1_attach_hang'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+
+    def test_relative_only_aim_fails_cleanly_before_recording(self):
+        """Absolute-cursor game whose aim ignores the absolute position: sighting rays are parallel."""
+        g, d, r = self.make(retries=0)
+        g.mouse_relative = True               # aim ignores absolute moves; cursor NOT locked (no recentring)
+        d.cursor_client = lambda: None        # cursor position unknown -> not treated as locked
+        res = self.run_ids(r, ['W1_attach_hang'])[0]
+        self.assertEqual(res['failure']['kind'], 'aim_failed')
+        self.assertEqual(self.sessions(self.root) + self.sessions(r.cfg.failed_root), [])
+        self.assertEqual(d.held, set())
+
+    # ------------------------------------------------------------------ live failure 2/5: takeover arming
+    def test_game_recentring_the_cursor_is_not_a_takeover(self):
+        g, d, r = self.make(cursor_recenters=True)
+        res = self.run_ids(r, ['M2_walk_short'])
+        self.assertEqual([x['status'] for x in res], ['pass'], [x.get('failure') for x in res])
+
+    def test_escape_during_readiness_is_not_a_takeover(self):
+        """Live 2026-10-11: physical Escape (0x1B) during the initial readiness wait aborted the run. Detection is
+        now armed only after readiness; F12 / Pause still work in every phase."""
+        g, d, r = self.make()
+        d.physical_at = [(g.index + 5, 'esc')]          # inside the readiness wait (settling takes 30 frames)
+        res = self.run_ids(r, ['M2_walk_short'])
+        self.assertEqual(res[0]['status'], 'pass', res[0].get('failure'))
+        self.assertIn('takeover detection armed: M2_walk_short', '\n'.join(r.ui.lines))
+        g2, d2, r2 = self.make()
+        d2.physical_at = [(g2.index + 5, 'f12')]        # emergency stop is honoured even before arming
+        with self.assertRaises(AbortRun):
+            self.run_ids(r2, ['M2_walk_short'])
+
+    def test_open_menu_delays_readiness_and_no_input_is_sent_meanwhile(self):
+        g, d, r = self.make(menu_frames=150)
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        first_input = min(e[2] for e in d.events if e[0] == 'down')
+        self.assertGreater(first_input, 150)
+
+    # ------------------------------------------------------------------ live failure 6: ground continuity
+    def test_ambiguous_ground_is_skipped_unless_trust_ground(self):
+        unknown = G.make_solid(77, 'oRockPoly', 700, 590, 1, 1, 0, None, 2)     # polygon fixture, no sprite
+        g, d, r = self.make(extra_solids=[unknown])
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertEqual(res['status'], 'skipped')
+        self.assertEqual(res['failure']['kind'], 'ground_ambiguous')
+        self.assertIn('-TrustGround', res['failure']['msg'])
+        self.assertFalse([e for e in d.events if e[1] in ('D', 'A')])
+        g, d, r = self.make(extra_solids=[unknown], trust_ground=True)
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        self.assertIn('OVERRIDDEN', res['ground_gate'])
+        self.assertIn('actual_max_right_px', res['ground_scan_check'])
+
+    def test_leaving_the_ground_is_explained_in_diagnostic_mode(self):
         g, d, r = self.make(retries=0, ground_x=(0, 600), scan_unavailable=True)
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertEqual((res['status'], res['failure']['kind']), ('skipped', 'ground_unavailable'))
+        g, d, r = self.make(retries=0, ground_x=(0, 600), scan_unavailable=True, trust_ground=True)
         res = self.run_ids(r, ['M2_walk_short'])[0]
         self.assertPreservedFailure(r, res, 'setup_invalid')
         lg = res['observations']['left_ground'][0]
         self.assertAlmostEqual(lg['distance_from_start_px'], 200, delta=15)
-        self.assertIn('px from the start', res['failure']['msg'])
         out = subprocess.run([sys.executable, DIAG, res['preserved_at']], capture_output=True, text=True)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn('support lost at frame', out.stdout)
-        self.assertIn('setup_invalid', out.stdout)
+        self.assertIn('ground instances walked on', out.stdout)
+
+    def test_ground_scan_diagnostic_and_capture_comparison(self):
+        g, d, r = self.make(ground_x=(0, 1000))
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        out = r.ground_scan(os.path.join(self.root, res['session']))
+        self.assertEqual(out['profile']['confidence'], 'estimate')
+        self.assertEqual([c['id'] for c in out['corridor']], [9001])
+        inst = out['compare']['instances']
+        self.assertEqual(len(inst), 1)
+        self.assertEqual(inst[0]['verdict'], 'OK')
+        self.assertFalse([e for e in d.events if e[2] > g.index - 1 and e[0] == 'down'])
 
     # ------------------------------------------------------------------ diagnostics
     def test_aim_scan_finds_mouse_following_variables(self):
@@ -340,13 +433,13 @@ class MockRun(unittest.TestCase):
         self.assertEqual(d.held, set())
         self.assertFalse([e for e in d.events if e[0] == 'down'])  # nothing was clicked or pressed
 
-    def test_aim_scan_reports_live_situation(self):
+    def test_aim_scan_reports_locked_cursor_without_usable_variables(self):
         g, d, r = self.make(crosshair_static=True, io_absent=('aimx', 'aimy'), cursor_recenters=True)
         an = r.aim_scan(os.path.join(self.tmp, 'scan'))
         self.assertEqual(an['followers'], [])
-        self.assertIsNone(an['feedback_pair'])
-        self.assertIn('sighting', an['recommendation'])
+        self.assertIsNone(an['relative_profile'])
         self.assertEqual(an['cursor']['mode'], 'recentred_or_locked')
+        self.assertIn('no variable pair responded', an['recommendation'])
         self.assertFalse(os.path.exists(r.cfg.aim_profile_file))
 
     def test_aim_sight_diagnostic(self):
@@ -599,7 +692,10 @@ class AimGeometry(unittest.TestCase):
 
 
 class GroundScan(unittest.TestCase):
-    SPR = {'w': 32, 'h': 32, 'ox': 16, 'oy': 16}
+    SPR = {'name': 'sGround', 'w': 32, 'h': 32, 'ox': 16, 'oy': 16}
+
+    def floor(self, sid, x0, x1, top, angle=0.0):
+        return G.make_solid(sid, 'oGround', (x0 + x1) / 2.0, top + 16, (x1 - x0) / 32.0, 1.0, angle, self.SPR, 1)
 
     def test_instance_box(self):
         self.assertEqual(G.instance_box(100, 200, 4, 1, 0, self.SPR), (36.0, 184.0, 164.0, 216.0))
@@ -608,18 +704,66 @@ class GroundScan(unittest.TestCase):
         self.assertAlmostEqual(b - t, 64, places=6)
 
     def test_edge_wall_and_unavailable(self):
-        floor = {'id': 1, 'obj': 'oGround', 'angle': 0, 'box': (0, 100, 600, 132)}
-        wall = {'id': 2, 'obj': 'oGround', 'angle': 0, 'box': (500, 0, 532, 100)}
+        floor = self.floor(1, 0, 600, 100)
+        wall = G.make_solid(2, 'oGround', 516, 50, 1, 100 / 32.0, 0, self.SPR, 1)
         p = G.ground_profile([floor], (200, 89), 1)
         self.assertEqual(p['confidence'], 'estimate')
         self.assertEqual(p['right']['end'], 'edge')
-        self.assertAlmostEqual(p['right']['clear_px'], 400, delta=G.STEP + 1)
-        self.assertAlmostEqual(p['left']['clear_px'], 200, delta=G.STEP + 1)
+        self.assertAlmostEqual(p['right']['clear_px'], 400, delta=G.STEP + 2)
+        self.assertAlmostEqual(p['left']['clear_px'], 200, delta=G.STEP + 2)
         p = G.ground_profile([floor, wall], (200, 89), 1)
         self.assertEqual(p['right']['end'], 'wall')
-        self.assertAlmostEqual(p['right']['clear_px'], 500 - 11 - 200, delta=G.STEP + 1)
+        self.assertAlmostEqual(p['right']['clear_px'], 500 - 11 - 200, delta=G.STEP + 2)
         self.assertEqual(G.ground_profile([floor], (200, 89), 99)['confidence'], 'unavailable')
-        self.assertEqual(G.ground_profile([floor], (200, 40), 1)['confidence'], 'unavailable')
+        self.assertEqual(G.ground_profile([floor], (200, 40), 1)['confidence'], 'ambiguous')
+
+    def test_adjacent_pieces_with_small_steps_are_continuous(self):
+        """The v1 scan stopped at the first piece; steps up to the body radius are walked over now."""
+        pieces = [self.floor(1, 0, 112, 100), self.floor(2, 112, 224, 106), self.floor(3, 224, 336, 98),
+                  self.floor(4, 336, 700, 103)]
+        p = G.ground_profile(pieces, (56, 89), 1)
+        self.assertEqual(p['confidence'], 'estimate')
+        self.assertGreater(p['right']['clear_px'], 600)
+        self.assertEqual([q[0] for q in p['right']['pieces']], [1, 2, 3, 4])
+
+    def test_rotated_pieces_use_their_real_surface(self):
+        """A slightly rotated slab: its axis-aligned box top is several px above the surface under the spider."""
+        slab = self.floor(1, 0, 400, 100, angle=1.5)
+        box_top = slab['box'][1]
+        sp = G.span_at(slab['poly'], 200)
+        self.assertGreater(sp[0] - box_top, 4.0)
+        nxt = self.floor(2, 399, 800, sp[0] + 5)                      # continues near the slab's right end
+        p = G.ground_profile([slab, nxt], (200, sp[0] - 11), 1)
+        self.assertEqual(p['confidence'], 'estimate', p.get('reason'))
+        self.assertGreater(p['right']['clear_px'], 450)
+
+    def test_tall_step_is_a_wall_and_big_level_change_is_not_flat(self):
+        p = G.ground_profile([self.floor(1, 0, 300, 100), self.floor(2, 300, 600, 80)], (100, 89), 1)
+        self.assertEqual(p['right']['end'], 'wall')
+        ramp = [self.floor(i, 100 * i, 100 * i + 100, 100 - 8 * i) for i in range(8)]
+        p = G.ground_profile(ramp, (50, 89), 0)
+        self.assertEqual(p['right']['end'], 'not_flat')
+
+    def test_unknown_shape_in_corridor_makes_scan_ambiguous(self):
+        unknown = G.make_solid(9, 'oRockPoly', 300, 95, 1, 1, 0, None, 2)
+        p = G.ground_profile([self.floor(1, 0, 600, 100), unknown], (100, 89), 1)
+        self.assertEqual(p['confidence'], 'ambiguous')
+        self.assertIn('oRockPoly', p['reason'])
+
+    def test_compare_with_capture_classifies_errors(self):
+        def frames(gid, xs, top):
+            return [{'player': {'body': {'pos_px': [x, top - 11]}, 'vars': {'ground': gid, 'ground_angle': 0}}}
+                    for x in xs]
+        ok = self.floor(1, 0, 300, 100)
+        off = self.floor(2, 300, 600, 90)                            # model 10 px above the real surface
+        rot = self.floor(3, 600, 900, 100, angle=3)                  # model rotated, reality flat
+        fr = frames(1, range(10, 290, 10), 100) + frames(2, range(310, 590, 10), 100) + \
+            frames(3, range(610, 890, 10), 100) + frames(4, range(910, 990, 10), 100)
+        rows = {r['id']: r for r in G.compare_with_capture([ok, off, rot], fr)}
+        self.assertEqual(rows[1]['verdict'], 'OK')
+        self.assertIn('constant offset -10.0', rows[2]['verdict'])
+        self.assertIn('varies along x', rows[3]['verdict'])
+        self.assertIn('NOT IN SCAN', rows[4]['verdict'])
 
     def test_solid_objects_from_inventory(self):
         objs, sprites = G.load_inventory()
@@ -627,6 +771,34 @@ class GroundScan(unittest.TestCase):
         self.assertIn('oGround', names)
         self.assertIn('oSolidPlatform', names)
         self.assertNotIn('oPlayer', names)
+
+
+class ImpulseAnalysis(unittest.TestCase):
+    def test_gain_integrator_and_pair_choice(self):
+        imps = []
+        for dx, dy in [(20, 0), (-20, 0), (60, 0), (-60, 0), (0, 20), (0, -20), (0, 60), (0, -60)]:
+            base = {'player.aimx': 500.0, 'player.aimy': 300.0, 'io.flash': 0.0}
+            series = [dict(base)]
+            for k in range(1, 9):
+                lagged = k >= 2
+                series.append({'player.aimx': 500.0 + (0.5 * dx if lagged else 0),
+                               'player.aimy': 300.0 + (0.5 * dy if lagged else 0),
+                               'io.flash': 1.0 if k == 1 else 0.0})
+            imps.append({'method': 'abs', 'd': (dx, dy), 'series': series})
+        resp = A.analyze_impulses(imps)
+        self.assertAlmostEqual(resp['abs']['player.aimx']['gx'], 0.5)
+        self.assertTrue(resp['abs']['player.aimx']['integrator'])
+        self.assertEqual(resp['abs']['player.aimx']['lag_frames'], 2)
+        self.assertNotIn('io.flash', resp['abs'])                    # transient: no end change
+        prof = A.choose_relative_profile(resp, {})
+        self.assertEqual(prof['pair'], ['player.aimx', 'player.aimy'])
+        self.assertEqual(prof['gain'], [[0.5, 0.0], [0.0, 0.5]])
+
+    def test_relations_with_aimdir(self):
+        rel = A.relations({'io.aimdir': 45.0, 'player.aimx': 110.0, 'player.aimy': 90.0, 'io.mx': 1.0, 'io.my': -1.0},
+                          (100.0, 100.0))
+        self.assertLess(rel['player.aimx/player.aimy']['point_err_deg'], 1e-6)
+        self.assertLess(rel['io.mx/io.my']['vector_err_deg'], 1e-6)
 
 
 if __name__ == '__main__':

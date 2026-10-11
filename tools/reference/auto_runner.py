@@ -9,6 +9,7 @@
     python tools/reference/auto_runner.py --list                    # suites, scenarios and the spot each needs
     python tools/reference/auto_runner.py --aim-scan                # cursor sweep, NO shots: what follows the mouse?
     python tools/reference/auto_runner.py --aim-sight               # 3 grapple taps into the floor: aim origin
+    python tools/reference/auto_runner.py --ground-scan [--compare-capture DIR]   # ground model, sends nothing
     python tools/reference/auto_runner.py --mock --all              # runner self-test against a FAKE game
 
 Launcher: powershell -ExecutionPolicy Bypass -File tools\\reference\\auto_record.ps1 -All
@@ -17,6 +18,7 @@ See docs/REFERENCE_TEST_PROCEDURE.md, section "Automated recording".
 """
 import argparse
 import datetime
+import json
 import os
 import sys
 import tempfile
@@ -48,6 +50,14 @@ def parse(argv=None):
                     help='diagnostic, fires nothing: sweep the cursor and record every oIO / oPlayer variable and the '
                          'actual cursor position; reports which variables follow the mouse and whether the game moves '
                          'the cursor')
+    ap.add_argument('--ground-scan', action='store_true',
+                    help='diagnostic, sends nothing: the ground model around the spider and the solids near it')
+    ap.add_argument('--compare-capture', metavar='SESSION_DIR',
+                    help='with --ground-scan: compare the model with where the spider really stood in that capture '
+                         '(made in the same room)')
+    ap.add_argument('--trust-ground', action='store_true',
+                    help='DIAGNOSTIC MODE: walk although the ground scan is ambiguous / unavailable (leaving the ground '
+                         'still stops the scenario; the result is marked OVERRIDDEN)')
     ap.add_argument('--aim-sight', action='store_true',
                     help='diagnostic: 3 short grapple taps into the floor to measure where the aim origin is on screen')
     ap.add_argument('--no-calibrate', action='store_true', help='never calibrate automatically')
@@ -102,6 +112,33 @@ def list_scenarios():
             print('  %-18s needs keys: %-28s spot: %s' % (sid, ', '.join(sc.needs), sc.setup))
 
 
+def print_ground_scan(gs):
+    if gs.get('error'):
+        print('ground scan: %s' % gs['error'])
+        return
+    p = gs['profile']
+    print('ground scan: confidence %s%s' % (p.get('confidence'), (' (%s)' % p['reason']) if p.get('reason') else ''))
+    print('  standing on %s (%s) at %s, foot y %s; %d solids (%d with unknown shape)' % (
+        p.get('ground_id'), p.get('ground_obj'), p.get('player'), p.get('foot_y'), p.get('solids', 0),
+        p.get('inexact_solids', 0)))
+    for d in ('right', 'left'):
+        if p.get(d):
+            q = p[d]
+            print('  %-5s clear %7.1f px, ends: %s %s; pieces %s; unknown shapes nearby %s' % (
+                d, q['clear_px'], q['end'], q.get('by') or q.get('level_change_px') or '',
+                [x[0] for x in q['pieces']][:12], q['unknown_solids'][:6]))
+    print('  solids near the spider (id obj exact shape sprite x y xscale yscale angle box surface@player):')
+    for r in gs['corridor'][:40]:
+        print('    %-7s %-18s %-5s %-4s %-12s %8.1f %8.1f %7.3f %7.3f %7.2f %s %s' % (
+            r['id'], r['obj'], r['exact'], r['shape'], r['sprite'], r['x'], r['y'], r['xscale'], r['yscale'],
+            r['angle'], r['box'], r['surface_at_player_x']))
+    if gs.get('compare'):
+        c = gs['compare']
+        print('  compared with %s (rooms %s, now %s):' % (c['session'], c['rooms'], c['room_now']))
+        for r in c['instances']:
+            print('    %-7s %-18s frames %-5d x %s  %s' % (r['id'], r['obj'], r['frames'], r['x_range'], r['verdict']))
+
+
 def main(argv=None):
     a = parse(argv)
     if a.list:
@@ -112,7 +149,7 @@ def main(argv=None):
     only = set(a.scenario) or None
     if only:
         suites = suites or [s for s in SUITE_ORDER if any(i in only for i in SUITES[s])]
-    diagnostic = a.aim_scan or a.aim_sight
+    diagnostic = a.aim_scan or a.aim_sight or a.ground_scan
     if not (suites or a.check or calibrating or diagnostic):
         print('nothing to do: pass --all, --suite, --scenario, --check or --calibrate')
         return 2
@@ -129,7 +166,8 @@ def main(argv=None):
     # and calibration / check alone records nothing, so there is nothing new for the tests to judge
     cfg = RN.Config(root, retries=a.retries, prompt=not a.no_prompt and not a.mock,
                     run_tests=bool(suites) and not (a.no_tests or a.mock),
-                    mouse_failsafe=not a.no_mouse_failsafe, mode='mock' if a.mock else 'live')
+                    mouse_failsafe=not a.no_mouse_failsafe, mode='mock' if a.mock else 'live',
+                    trust_ground=a.trust_ground)
     run_info = {'stamp': RN.stamp(), 'mode': cfg.mode, 'started': datetime.datetime.now().isoformat(),
                 'argv': sys.argv[1:] if argv is None else argv}
     print('Desktop Playground automated reference run %s (%s)' % (run_info['stamp'], cfg.mode))
@@ -165,6 +203,17 @@ def main(argv=None):
         print('Attaching (read-only)...')
         run_info['init'] = runner.initialise(focus=not a.check)['report']
         run_info['bindings_source'] = bnd.source
+        if a.ground_scan:
+            gs = runner.ground_scan(a.compare_capture)
+            run_info['ground_scan'] = gs
+            out = os.path.join(cfg.runs_root, run_info['stamp'])
+            os.makedirs(out, exist_ok=True)
+            with open(os.path.join(out, 'ground_scan.json'), 'w') as f:
+                json.dump(gs, f, indent=1, default=str)
+            print_ground_scan(gs)
+            print('details: %s' % os.path.join(out, 'ground_scan.json'))
+            if not (suites or calibrating or a.aim_scan or a.aim_sight or a.check):
+                cfg.run_tests = False
         if a.check:
             reasons = runner.wait_ready('any')
             print('readiness: %s' % ('READY' if not reasons else 'NOT READY: ' + '; '.join(reasons)))

@@ -153,15 +153,34 @@ class LiveProvider:
                     out[self.id2name.get(key, 'var%d' % key)] = v
         return out
 
+    def ground_solids(self):
+        """Every solid instance as groundscan models it (read-only; one instance walk)."""
+        if not hasattr(self, '_inv'):
+            self._inv = groundscan.load_inventory()
+        return groundscan.live_solids(self.game, self.p, self.obj_names, *self._inv)
+
     def ground_profile(self, row):
-        """groundscan estimate around the player in `row` (read-only; one instance walk)."""
+        """groundscan estimate around the player in `row`."""
         b = (row.get('player') or {}).get('body')
         if not b:
             return {'confidence': 'unavailable', 'reason': 'no player body'}
-        if not hasattr(self, '_inv'):
-            self._inv = groundscan.load_inventory()
-        solids = groundscan.live_solids(self.game, self.p, self.obj_names, *self._inv)
-        return groundscan.ground_profile(solids, b['pos_px'], ((row['player'].get('vars') or {}).get('ground')))
+        return groundscan.ground_profile(self.ground_solids(), b['pos_px'],
+                                         ((row['player'].get('vars') or {}).get('ground')))
+
+    MENU_OBJECTS = ('oMenu', 'oMainMenu', 'oSettingsMenu', 'oKeyBindingMenu', 'oConfirmMenu', 'oLoadMenu',
+                    'oNewMenu', 'oSaveSlotMenu', 'oCreditsMenu', 'oMenuControllerPrompt')
+
+    def pause_state(self):
+        """Open menu instances (by object name) and any `paused` variable on oIO / oPlayer. Read-only."""
+        menus = sorted({self.obj_names[c['obj']] for _, c in self.game.walk()
+                        if c['obj'] < len(self.obj_names) and self.obj_names[c['obj']] in self.MENU_OBJECTS})
+        paused = {}
+        for which, inst in (('io', self.rec.io), ('player', self.rec.player)):
+            if inst:
+                v = self.game.vars(inst, ['paused']).get('paused')
+                if v is not None:
+                    paused[which] = v
+        return {'menus': menus, 'paused': paused}
 
     def close(self):
         try:
