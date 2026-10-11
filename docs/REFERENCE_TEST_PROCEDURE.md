@@ -48,9 +48,40 @@ every frame through the read-only probe above.
 All commands run from the `desktop-playground` folder. They are written in short form below; the full form
 is `powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 <options>`.
 
+**Start-up workflow (2026-10-11, third live run): no Alt+Tab, no Enter.** Start the command in PowerShell and
+leave it. For each new setup the runner:
+1. prints and beeps the spot it needs;
+2. brings Webbed to the front itself. It tries SetForegroundWindow, AttachThreadInput, SwitchToThisWindow, then
+   minimise/restore, and never sends input to another window. If Windows refuses all of them, click Webbed's
+   **title bar**;
+3. waits, while you move the spider there and close any menu, until:
+   - the spider is controllable;
+   - the game isn't paused;
+   - the spider is at rest;
+   - you've let go of mouse and keyboard for 3 s;
+4. beeps once, arms, and starts.
+
+Until that beep, your input and focus changes are allowed (Escape, menus, Alt+Tab). F12 / Pause always stops.
+After the beep: hands off. Touching anything, or leaving the Webbed window, stops the run safely.
+
+**Menus.** Menu objects such as `oSettingsMenu` and `oMenuControllerPrompt` can exist during gameplay, so their
+existence is reported, not treated as "open". The runner waits only on real evidence:
+- a `paused` variable that is set, on any instance;
+- the menu-open indicator measured by `-StateScan`.
+
+If the game is paused in a way the runner can't see, a walk stops after 30 frames (`not_controllable`), and an
+aimed shot is never fired (the aim doesn't respond).
+
 **Step by step (recommended order; each step is separate):**
 1. `-SelfTest`: no game needed. It must end with `SELF-TEST OK`.
-2. `-Check`: in a level, standing on solid ground. It sends no input and must say `readiness: READY`.
+2. `-Check`: read-only; it changes no focus and sends no input. It reports a snapshot:
+   - simulation frame rate and whether Webbed is in front;
+   - player control state;
+   - every menu instance with its variables, and every `paused` variable;
+   - readiness.
+2b. `-StateScan`: read-only, about 20 s. Switch to Webbed. At **one** beep open the pause menu (Escape) and leave
+    it open; at **two** beeps close it. It finds the variable that really means "menu open" and saves it to
+    `DesktopPlaygroundLocal\game_state_profile.local.json`; readiness uses it from then on.
 3. `-List`: shows the suites, the keys each needs, and the spot each needs.
 3b. `-AimScan`: **no clicks or keys**. It sweeps the cursor over the window and records every `oIO`/`oPlayer`
     variable plus the real cursor position. It reports whether any variable follows the mouse, and whether the

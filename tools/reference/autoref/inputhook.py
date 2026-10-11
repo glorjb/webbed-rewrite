@@ -41,6 +41,7 @@ class TakeoverMonitor:
         self.last_pt = None
         self.counts = {'ours': 0, 'physical_moves': 0, 'foreign_injected_moves': 0, 'physical_keys': 0,
                        'foreign_other': 0}
+        self.last_user_t = None         # time of the last physical / foreign event, armed or not (hands-off wait)
 
     def arm(self):
         self.reason, self.travel, self.armed = None, 0.0, True
@@ -58,12 +59,15 @@ class TakeoverMonitor:
                 self.counts['foreign_injected_moves'] += 1
                 return
             self.counts['physical_moves'] += 1
+            if prev is not None and math.hypot(x - prev[0], y - prev[1]) >= 2:
+                self.last_user_t = self.clock()
             if self.armed and prev is not None:
                 self.travel += math.hypot(x - prev[0], y - prev[1])
                 if self.travel >= MOVE_TAKEOVER_PX and not self.reason:
                     self.reason = 'physical mouse movement (%.0f px)' % self.travel
             return
         self.counts['foreign_other'] += 1
+        self.last_user_t = self.clock()
         if self.armed and not self.reason:
             self.reason = '%s mouse %s' % ('injected (another program)' if injected else 'physical',
                                           MOUSE_MSG_NAMES.get(msg, 'event 0x%X' % msg))
@@ -75,12 +79,17 @@ class TakeoverMonitor:
             self.emergency = True
             return
         self.counts['physical_keys' if not injected else 'foreign_other'] += 1
+        self.last_user_t = self.clock()
         if self.armed and not self.reason:
             self.reason = '%s key press (virtual key 0x%02X)' % ('injected (another program)' if injected
                                                                  else 'physical', vk)
 
     def takeover(self):
         return self.reason if self.armed else None
+
+    def idle_seconds(self):
+        """Seconds since the user last touched mouse / keyboard (inf if never seen)."""
+        return float('inf') if self.last_user_t is None else self.clock() - self.last_user_t
 
 
 class LowLevelHooks:

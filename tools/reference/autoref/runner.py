@@ -32,7 +32,11 @@ from .scenarios import (ACK_FRAMES, SCENARIOS, SIGHT_ANGLES, SUITES, Ctx, Relati
                         sight)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RETRYABLE = {'missed_input', 'capture_invalid', 'inconsistent', 'timeout', 'aim_failed'}
+RETRYABLE = {'missed_input', 'capture_invalid', 'inconsistent', 'timeout', 'aim_failed', 'not_controllable'}
+HANDS_OFF_S = 3.0                    # the user must not have touched mouse/keyboard for this long before arming
+SETUP_WINDOW_FRAMES = 15 * 60        # after a setup announcement: time to start moving the spider into place
+PREPARE_TIMEOUT_FRAMES = 120 * 60    # setup + readiness (closing menus, unpausing, positioning) may take a while
+REFOCUS_EVERY_S = 5.0
 TAIL_FRAMES = 30
 READY_TIMEOUT_FRAMES = 1200          # 20 s to become controllable and settle
 RELEVANT_TESTS = {
@@ -58,9 +62,11 @@ class Config:
         self.runs_root = os.path.join(parent, 'auto_runs')
         self.bindings_file = bindings_file or os.path.join(parent, 'auto_bindings.local.json')
         self.aim_profile_file = os.path.join(parent, 'aim_profile.local.json')
+        self.state_profile_file = os.path.join(parent, 'game_state_profile.local.json')
         self.retries, self.prompt, self.run_tests = retries, prompt, run_tests
         self.mouse_failsafe, self.mode = mouse_failsafe, mode
         self.trust_ground = trust_ground    # DIAGNOSTIC: walk although the ground scan is ambiguous / unavailable
+        self.setup_window_frames = SETUP_WINDOW_FRAMES
 
 
 class ConsoleUI:
@@ -69,6 +75,14 @@ class ConsoleUI:
 
     def say(self, msg=''):
         print(msg, flush=True)
+
+    def beep(self, n=1):
+        try:
+            import winsound
+            for _ in range(n):
+                winsound.Beep(880, 120)
+        except Exception:
+            pass
 
     def ask(self, msg):
         """Returns '' (go), 's' (skip) or 'q' (quit). Non-interactive: always go."""
@@ -90,6 +104,8 @@ class Runner:
         self.last_row = None
         self.io_keys_seen = set()       # oIO variables that actually exist (the probe returns only present ones)
         self.calibration = None         # per-action calibration report (for the run report)
+        self.state_profile = self._load_state_profile()
+        self.last_game_state = None
         self.aim_profile = self._load_aim_profile()
 
     # ---------------------------------------------------------------- frame loop
@@ -120,28 +136,59 @@ class Runner:
         except StopIteration:
             return
 
-    def wait_ready(self, need_support, timeout=READY_TIMEOUT_FRAMES):
-        """Wait until controllable and settled. Returns [] when ready, else the last reasons (with the measured
-        speed when the only problem is that the spider never stayed at rest long enough)."""
+    def pause_reasons(self, state):
+        """Interpret game_state evidence. Menu instances alone are NOT 'open' (they can persist hidden); blocking
+        evidence is: a `paused` variable that is set on some instance, or the measured -StateScan indicator."""
+        out = []
+        on = [o for o in state.get('paused_owners', []) if o.get('value') not in (None, 0, False, 0.0)]
+        if on:
+            out.append('the game is paused (%s)' % ', '.join('%s#%s.paused=%s' % (o['obj'], o['id'], o['value'])
+                                                              for o in on))
+        ind = self.state_profile
+        if ind and hasattr(self.p, 'indicator_value'):
+            v = self.p.indicator_value(ind)
+            if v in ind['open_values']:
+                out.append('a menu is open (%s.%s=%s, indicator measured by -StateScan)' % (ind['obj'], ind['var'], v))
+        return out
+
+    def wait_ready(self, need_support, timeout=READY_TIMEOUT_FRAMES, hands_off=False, refocus=False,
+                   progress=False):
+        """Wait until controllable, unpaused and settled. Returns [] when ready, else the last reasons.
+        hands_off: also require no physical mouse/keyboard input for HANDS_OFF_S (setup phases, unarmed).
+        refocus: when Webbed is not in front and the user is idle, bring it back (non-injecting) every few s.
+        Focus loss itself only aborts when armed (SafetyGuard)."""
         tr = S.SettleTracker()
         reasons = ['no frame']
         best, speeds = 0, []
-        pause = None
+        pause_r, last_focus_try, last_say = [], 0.0, 0.0
+        self.last_game_state = None
         for n in range(timeout):
             row = self.frame()
             reasons = S.readiness(row, need_support)
-            if n % 30 == 0 and hasattr(self.p, 'pause_state'):
-                pause = self.p.pause_state()       # menus / paused flag: an instance walk, so not every frame
-            if pause and (pause['menus'] or any(pause['paused'].values())):
-                reasons = reasons + ['the game is paused or a menu is open (%s); close it - the runner waits '
-                                     'and ignores your input until then' % (pause['menus'] or pause['paused'])]
+            if n % 30 == 0 and hasattr(self.p, 'game_state'):
+                self.last_game_state = self.p.game_state()     # an instance walk, so not every frame
+                pause_r = self.pause_reasons(self.last_game_state)
+            if pause_r:
+                reasons = reasons + pause_r + ['the runner waits; close menus / unpause in Webbed']
                 tr.frames = 0
+            if refocus and not self.d.foreground_ok():
+                reasons = reasons + ['Webbed is not the foreground window']
+                now = time.monotonic()
+                if self.d.user_idle_seconds() >= HANDS_OFF_S and now - last_focus_try >= REFOCUS_EVERY_S:
+                    last_focus_try = now
+                    self.d.focus_game(timeout_s=2.0)
+            if hands_off and self.d.user_idle_seconds() < HANDS_OFF_S:
+                reasons = reasons + ['you touched mouse/keyboard %.1f s ago (hands off for %.0f s to start)'
+                                     % (self.d.user_idle_seconds(), HANDS_OFF_S)]
             tr.update(row)
             best = max(best, tr.frames)
             if S.body(row):
                 speeds.append(S.speed_pxps(row))
             if not reasons and tr.settled:
                 return []
+            if progress and time.monotonic() - last_say > 5.0 and n > 0:
+                last_say = time.monotonic()
+                self.ui.say('     waiting: %s' % ('; '.join(reasons) if reasons else 'spider settling'))
         if not reasons and not tr.settled:
             recent = speeds[-60:] or [float('nan')]
             reasons = ['the spider did not come to rest: needs |v| < %.1f px/s for %d consecutive frames; longest '
@@ -150,11 +197,55 @@ class Runner:
                           S.support(self.last_row))]
         return reasons
 
+    def prepare(self, phase, need_support, setup_text=None, gate=None):
+        """The one start-up path before the runner sends ANY input:
+          1. disarmed (your input is allowed: walk the spider, close menus, unpause);
+          2. optional setup window: the setup is announced; you get time to move the spider (no Enter needed);
+          3. Webbed brought to the front automatically (non-injecting), re-tried while you are idle;
+          4. wait: controllable, not paused / no measured menu open, at rest, and hands off for HANDS_OFF_S;
+          5. optional gate (e.g. the ground scan) on the ready state;
+          6. armed (takeover + focus-loss protection), right before the first input.
+        F12 / Pause stop at every step. Returns a list of reasons when not ready (nothing was sent)."""
+        self.d.disarm()
+        self.d.release_all()
+        if setup_text:
+            self.ui.say('')
+            self.ui.say('>>> %s - setup: %s' % (phase, setup_text))
+            self.ui.say('    Move the spider there in Webbed now (no need to come back here). The run starts by itself '
+                        'once the spider is at rest and you have let go of mouse and keyboard for %.0f s.' % HANDS_OFF_S)
+            self.ui.beep(2)
+            t0 = self.d.user_idle_seconds()
+            for _ in range(self.cfg.setup_window_frames):   # time to start moving; ends early once you have moved
+                self.frame()
+                idle = self.d.user_idle_seconds()
+                if idle < t0 or idle < 1.0:                 # you started moving the spider
+                    break
+                t0 = idle
+        if not self.d.foreground_ok():
+            self.d.focus_game(timeout_s=5.0)
+        reasons = self.wait_ready(need_support, timeout=PREPARE_TIMEOUT_FRAMES, hands_off=True, refocus=True,
+                                  progress=True)
+        if reasons:
+            return reasons
+        if gate:
+            r = gate()
+            if r:
+                return r
+        if not self.d.foreground_ok():                      # last chance, still unarmed
+            if not self.d.focus_game():
+                return ['could not bring Webbed to the front: click its TITLE BAR (not inside the game)']
+            reasons = self.wait_ready(need_support, timeout=READY_TIMEOUT_FRAMES, hands_off=True)
+            if reasons:
+                return reasons
+        self.arm(phase)
+        self.ui.beep(1)
+        return []
+
     def ensure_ready(self, need_support, purpose, timeout=READY_TIMEOUT_FRAMES):
-        """Gate: wait until ready or raise ScenarioFailure('not_ready'). Never continues on a failed check."""
-        self.ui.say('  waiting up to %d s for the spider to be controllable and at rest (%s)...'
-                    % (timeout // 60, purpose))
-        reasons = self.wait_ready(need_support, timeout)
+        """Gate before inputs (prepare + raise): never continues on a failed check; arms on success."""
+        self.ui.say('  getting ready (%s): bringing Webbed to the front, waiting until the spider is controllable, '
+                    'unpaused and at rest...' % purpose)
+        reasons = self.prepare(purpose, need_support)
         if reasons:
             raise ScenarioFailure('not_ready', '%s: %s' % (purpose, '; '.join(reasons)))
 
@@ -185,6 +276,15 @@ class Runner:
         complete, right before the runner's own inputs. F12 / Pause work in every phase regardless."""
         self.d.arm()
         self.ui.say('     [takeover detection armed: %s; hands off - F12 / Pause stops]' % phase)
+
+    def _load_state_profile(self):
+        """Menu-open indicator measured by -StateScan (instance variable of an object), or None."""
+        try:
+            with open(self.cfg.state_profile_file) as f:
+                prof = json.load(f)
+        except (OSError, ValueError):
+            return None
+        return prof if prof.get('kind') == 'instance_var' and prof.get('open_values') else None
 
     def _load_aim_profile(self):
         """Verified aim profile from -AimScan: 'relative' (locked cursor, delta impulses) or absolute feedback."""
@@ -221,12 +321,11 @@ class Runner:
         keys = {a: base.key(a) for a in self.CAL_ORDER}
         cal = dict(base.calibrated)
         report = {}
-        self.ensure_ready('any', 'calibration start')
-        self.arm('calibration')
+        self.ensure_ready('any', 'calibration')
         used = {k.upper() for a, k in keys.items() if k and a not in actions}
         for i, action in enumerate(actions):
             if i:
-                reasons = self.wait_ready('any')
+                reasons = self.wait_ready('any')     # armed: the user should not touch anything now
                 if reasons:
                     for rest in actions[i:]:
                         report[rest] = {'status': 'not attempted', 'reason': 'spider not at rest: ' + '; '.join(reasons)}
@@ -306,16 +405,25 @@ class Runner:
                               'msg': 'no confirmed key for %s; nothing was recorded (see -Calibrate%s)' % (
                                   missing, ' and W4_retract_probe' if 'retract' in missing else '')}
             return res
-        self.d.disarm()                 # readiness / unpausing: the user may still be touching the game
-        reasons = self.wait_ready(sc.support)
+        gate_box = {}
+
+        def gate():                     # setup validation BEFORE any input: is there enough walkable ground?
+            g = self._ground_gate(sc, res) if sc.space else None
+            if g:
+                gate_box['res'] = g
+                return [g['failure']['msg']]
+            return []
+        reasons = self.prepare(sc.id, sc.support, setup_text=getattr(sc, '_announce', None), gate=gate)
+        sc._announce = None
+        if gate_box.get('res'):
+            return gate_box['res']
         if reasons:
             res['failure'] = {'kind': 'not_ready', 'msg': '; '.join(reasons)}
+            if self.last_game_state:
+                res['game_state'] = self.last_game_state
             return res
-        if sc.space:                    # setup validation BEFORE any input: is there enough walkable ground?
-            gate = self._ground_gate(sc, res)
-            if gate:
-                return gate
-        self.arm(sc.id)
+        if self.last_game_state:
+            res['game_state'] = self.last_game_state
         aimer, aim_sources = None, None
         if sc.aim:
             prof = self.aim_profile
@@ -432,6 +540,80 @@ class Runner:
                           % (conf, prof.get('reason'))}
         return res
 
+    def state_snapshot(self, frames=60):
+        """READ-ONLY snapshot for -Check: is the simulation advancing (fps over `frames`), foreground window,
+        player control state, menu instances with all their variables, every `paused` owner, physics-world bytes,
+        and the runner's verdict (blocking reasons) from that evidence."""
+        t0 = time.monotonic()
+        rows = [self.frame() for _ in range(frames)]
+        dt = time.monotonic() - t0
+        row = rows[-1]
+        b = S.body(row)
+        moved = [S.speed_pxps(r) for r in rows if S.body(r)]
+        st = self.p.game_state(refresh=True) if hasattr(self.p, 'game_state') else {}
+        menus = []
+        if hasattr(self.p, 'menu_instances'):
+            for ptr, iid, obj in self.p.menu_instances():
+                menus.append({'id': iid, 'obj': obj, 'vars': self.p.instance_vars(ptr)})
+        return {'game_fps': round((rows[-1]['frame'] - rows[0]['frame']) / dt, 1) if dt > 0 else None,
+                'webbed_in_front': bool(self.d.foreground_ok()),
+                'player': {'present': bool(b), 'locked': S.pvars(row).get('locked'), 'support': S.support(row),
+                           'max_speed_pxps': round(max(moved), 2) if moved else None,
+                           'readiness_reasons': S.readiness(row, 'any')},
+                'menus': menus, 'paused_owners': st.get('paused_owners'),
+                'state_profile': self.state_profile,
+                'blocking_reasons': self.pause_reasons(st) if st else [],
+                'world_raw': self.p.world_raw() if hasattr(self.p, 'world_raw') else None}
+
+    def state_scan(self, out_dir, phase_frames=300, lead_frames=300):
+        """Diagnostic, READ-ONLY (no input, no focus change, never armed): find what really signals an open menu.
+        Phases (beeps mark them): A menu closed, B open the pause menu (Esc), C close it again. Every frame: frame
+        counter, foreground window, player presence / locked / speed; every 5th frame also: all variables of every
+        menu instance, every instance's `paused` variable, raw physics-world bytes. Saves the indicator (if one is
+        found) to game_state_profile.local.json, which readiness then uses."""
+        from . import statescan as SS
+        os.makedirs(out_dir, exist_ok=True)
+        self.ui.say('State scan: switch to Webbed now and stay in gameplay. In %d s: ONE beep = open the pause menu '
+                    '(Esc) and leave it open; TWO beeps = close it; THREE beeps = done.' % (lead_frames // 60))
+        for _ in range(lead_frames):
+            self.frame()
+        samples = []
+        t0 = time.monotonic()
+        with open(os.path.join(out_dir, 'statescan.jsonl'), 'w') as f:
+            for i, phase in enumerate(SS.PHASES):
+                if i:
+                    self.ui.beep(i)
+                    self.ui.say('  phase %s' % phase)
+                if hasattr(self.p, 'on_phase'):        # mock only: scripted "user" for the self-test
+                    self.p.on_phase(phase)
+                for n in range(phase_frames):
+                    row = self.frame()
+                    b = S.body(row)
+                    smp = {'phase': phase, 'frame': row['frame'], 't': round(time.monotonic() - t0, 4),
+                           'fg': bool(self.d.foreground_ok()),
+                           'player': {'present': bool(b), 'locked': S.pvars(row).get('locked'),
+                                      'speed': S.speed_pxps(row) if b else None}}
+                    if n % 5 == 0:
+                        smp['menus'] = {str(iid): {'obj': obj, 'vars': self.p.instance_vars(ptr)}
+                                        for ptr, iid, obj in self.p.menu_instances()}
+                        smp['paused'] = {'%s#%s' % (obj, iid): v for _, iid, obj, v in
+                                         self.p.find_var_owners('paused', refresh=(n == 0 and i == 0))}
+                        smp['world_raw'] = self.p.world_raw()
+                    samples.append(smp)
+                    f.write(json.dumps(smp, default=str) + '\n')
+        self.ui.beep(3)
+        an = SS.analyze_statescan(samples)
+        with open(os.path.join(out_dir, 'statescan_report.json'), 'w') as f:
+            json.dump(an, f, indent=1, default=str)
+        if an.get('indicator'):
+            prof = dict(an['indicator'], measured=stamp(), note='from -StateScan; readiness waits while it shows open')
+            if os.path.exists(self.cfg.state_profile_file):
+                os.replace(self.cfg.state_profile_file, self.cfg.state_profile_file + '.%s.bak' % stamp())
+            with open(self.cfg.state_profile_file, 'w') as f:
+                json.dump(prof, f, indent=1)
+            self.state_profile = prof
+        return an
+
     def ground_scan(self, compare_session=None):
         """Diagnostic, sends nothing: the ground model around the spider, the corridor solids, and optionally a
         comparison with a capture made at the same spot (where the spider really stood)."""
@@ -481,8 +663,7 @@ class Runner:
         """Diagnostic, fires nothing: move the cursor over a grid (absolute) and in small steps (relative); at the
         end of every hold record the requested and actual cursor, Windows' cursor state and EVERY numeric instance
         variable of oIO and oPlayer. Writes aimscan.jsonl + aimscan_report.json and returns the analysis."""
-        self.ensure_ready('any', 'aim scan')
-        self.arm('aim scan (cursor moves only)')
+        self.ensure_ready('any', 'aim scan (cursor moves only)')
         w, h = self.d.client_size()
         # small symmetric grid around the current cursor: classifies the cursor (free / locked) and finds
         # absolute followers, while summing to zero motion if the game reads it as deltas (locked cursor)
@@ -575,10 +756,10 @@ class Runner:
         """Diagnostic: only the sighting (3 grapple taps into the floor). Returns the sighting result."""
         self.ensure_ready('ground', 'aim sighting')
         if self.cursor_locked():
+            self.d.disarm()
             return {'ok': False, 'P': None, 'sighting': None, 'failure': {
                 'kind': 'aim_failed', 'msg': 'the game locks the cursor: sighting needs absolute aiming; use the '
                                              'relative aim profile from -AimScan (nothing was fired)'}}
-        self.arm('aim sighting')
         res = {}
         aimer = self._sight(res)
         self.d.disarm()
@@ -626,19 +807,20 @@ class Runner:
             for sid in ids:
                 sc = SCENARIOS[sid]
                 if sc.setup != last_setup and 'Same spot' not in sc.setup:
-                    self.ui.say('')
-                    self.ui.say('[%s] %s  setup: %s' % (suite, sid, sc.setup))
                     self.d.disarm()            # the user is about to use mouse and keyboard
-                    ans = self.ui.ask('Position the spider (standing still), then switch back here.')
-                    if ans == 'q':
-                        stop = True
-                        break
-                    if ans == 's':
-                        self.results.append({'scenario': sid, 'suite': suite, 'status': 'skipped',
-                                             'failure': {'kind': 'skipped', 'msg': 'skipped by user'}})
-                        continue
-                    self.d.mouse = None        # the user moved the mouse during setup: new takeover baseline
-                    self.focus()
+                    if self.cfg.prompt:        # optional console prompt (-Prompt); default: no Alt+Tab needed
+                        self.ui.say('')
+                        self.ui.say('[%s] %s  setup: %s' % (suite, sid, sc.setup))
+                        ans = self.ui.ask('Position the spider (standing still), then switch back here.')
+                        if ans == 'q':
+                            stop = True
+                            break
+                        if ans == 's':
+                            self.results.append({'scenario': sid, 'suite': suite, 'status': 'skipped',
+                                                 'failure': {'kind': 'skipped', 'msg': 'skipped by user'}})
+                            continue
+                    else:
+                        sc._announce = sc.setup  # announced in prepare(); the user sets up in the game
                 last_setup = sc.setup if 'Same spot' not in sc.setup else last_setup
                 for attempt in range(1, self.cfg.retries + 2):
                     self.ui.say('  -> %s attempt %d ...' % (sid, attempt))

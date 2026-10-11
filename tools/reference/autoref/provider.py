@@ -133,9 +133,12 @@ class LiveProvider:
                 writer.sweep_done()
 
     def all_vars(self, which):
-        """EVERY numeric instance variable of the player ('player') or the input object ('io'), by name
-        (read-only hashmap walk, same layout as webbed_probe.Game.vars but without a name filter)."""
-        inst = self.rec.player if which == 'player' else self.rec.io
+        """EVERY numeric instance variable of the player ('player') or the input object ('io'), by name."""
+        return self.instance_vars(self.rec.player if which == 'player' else self.rec.io)
+
+    def instance_vars(self, inst):
+        """EVERY numeric instance variable of one instance, by name (read-only hashmap walk, same layout as
+        webbed_probe.Game.vars but without a name filter)."""
         m = self.game.m
         vmap = m.u32(inst + self.p.INST_VARMAP) if inst else None
         hdr = m.raw(vmap, 0x14) if vmap else None
@@ -170,17 +173,63 @@ class LiveProvider:
     MENU_OBJECTS = ('oMenu', 'oMainMenu', 'oSettingsMenu', 'oKeyBindingMenu', 'oConfirmMenu', 'oLoadMenu',
                     'oNewMenu', 'oSaveSlotMenu', 'oCreditsMenu', 'oMenuControllerPrompt')
 
-    def pause_state(self):
-        """Open menu instances (by object name) and any `paused` variable on oIO / oPlayer. Read-only."""
-        menus = sorted({self.obj_names[c['obj']] for _, c in self.game.walk()
-                        if c['obj'] < len(self.obj_names) and self.obj_names[c['obj']] in self.MENU_OBJECTS})
-        paused = {}
-        for which, inst in (('io', self.rec.io), ('player', self.rec.player)):
-            if inst:
-                v = self.game.vars(inst, ['paused']).get('paused')
-                if v is not None:
-                    paused[which] = v
-        return {'menus': menus, 'paused': paused}
+    def _obj(self, c):
+        return self.obj_names[c['obj']] if c['obj'] < len(self.obj_names) else 'obj%d' % c['obj']
+
+    def menu_instances(self):
+        """Active instances of menu objects: [(ptr, id, object)]. EXISTENCE IS NOT 'OPEN' (live 2026-10-11:
+        oSettingsMenu / oMenuControllerPrompt were present while the game was being played)."""
+        return [(p, c['id'], self._obj(c)) for p, c in self.game.walk() if self._obj(c) in self.MENU_OBJECTS]
+
+    def find_var_owners(self, name, refresh=False):
+        """Every active instance that owns instance variable `name`: [(ptr, id, object, value)]. The full
+        instance scan is cached; values are re-read on every call."""
+        vid = self.game.var_ids.get(name)
+        if vid is None:
+            return []
+        cache = getattr(self, '_owners', {})
+        if refresh or name not in cache:
+            owners = []
+            for p, c in self.game.walk():
+                vmap = self.game.m.u32(p + self.p.INST_VARMAP)
+                hdr = self.game.m.raw(vmap, 0x14) if vmap else None
+                if not hdr:
+                    continue
+                size, _, _, _, elems = struct.unpack('<5I', hdr)
+                if not elems or not (0 < size <= 1 << 16):
+                    continue
+                blob = self.game.m.raw(elems, size * 12) or b''
+                if any(h and k == vid for _, k, h in struct.iter_unpack('<IiI', blob)):
+                    owners.append((p, c['id'], self._obj(c)))
+            cache[name] = owners
+            self._owners = cache
+        out = []
+        for p, iid, obj in cache[name]:
+            c = self.game.core(p)
+            if c and c['id'] == iid and (c['flags'] & 3) == 0:
+                out.append((p, iid, obj, self.game.vars(p, [name]).get(name)))
+        return out
+
+    def world_raw(self, length=0x80):
+        """Raw bytes of the physics world object (for -StateScan: locating a pause flag by comparison)."""
+        room = self.game.room_ptr()
+        w = self.game.m.u32(room + self.p.ROOM_PHYS_WORLD) if room else None
+        b = self.game.m.raw(w, length) if w else None
+        return b.hex() if b else None
+
+    def game_state(self, refresh=False):
+        """Evidence about pause / menus (read-only). Interpretation is the runner's (Runner.pause_reasons)."""
+        return {'menus': [{'id': i, 'obj': o} for _, i, o in self.menu_instances()],
+                'paused_owners': [{'id': i, 'obj': o, 'value': v}
+                                  for _, i, o, v in self.find_var_owners('paused', refresh=refresh)]}
+
+    def indicator_value(self, ind):
+        """Current value of a measured menu-open indicator (from -StateScan): an instance variable of an object."""
+        for p, iid, obj in [(p, i, o) for p, i, o in self.menu_instances()] + \
+                [(p, i, o) for p, i, o, _ in self.find_var_owners(ind['var'])]:
+            if obj == ind['obj']:
+                return self.instance_vars(p).get(ind['var'])
+        return None
 
     def close(self):
         try:

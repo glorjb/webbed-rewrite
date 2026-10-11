@@ -63,6 +63,16 @@ class InputDriver:
         """Reason string when the user took over since arm(), else None."""
         return None
 
+    @property
+    def armed(self):
+        m = getattr(self, 'monitor', None)
+        return bool(m and m.armed)
+
+    def user_idle_seconds(self):
+        """Seconds since the last physical mouse / keyboard input (inf when unknown)."""
+        m = getattr(self, 'monitor', None)
+        return m.idle_seconds() if m else float('inf')
+
     def arm(self):
         """Start takeover detection (the runner owns the game from now on)."""
 
@@ -122,7 +132,10 @@ class SafetyGuard:
     """Checked once per loop iteration by the runner; raises AbortRun with the reason."""
     def __init__(self, driver, watchdog=None, mouse_failsafe=True):
         self.driver, self.watchdog, self.mouse_failsafe = driver, watchdog, mouse_failsafe
-        self.require_focus = True        # False only for observe-only use (-Check): no input is ever sent then
+        # Focus-loss abort applies while the runner is ARMED (it may send input). Unarmed phases (setup, readiness,
+        # read-only diagnostics) tolerate focus changes: no input is sent then, and the driver itself refuses to
+        # send anything to a window that is not Webbed. require_focus=False disables it entirely (-Check).
+        self.require_focus = True
         self.reason = None
         atexit.register(driver.release_all)
 
@@ -133,7 +146,7 @@ class SafetyGuard:
                 self.abort(self.watchdog.tripped)
         if self.driver.emergency_pressed():
             self.abort('EMERGENCY STOP (F12 / Pause pressed)')
-        if self.require_focus and not self.driver.foreground_ok():
+        if self.require_focus and self.driver.armed and not self.driver.foreground_ok():
             self.abort('the game window lost focus (no inputs are sent to other windows)')
         if self.mouse_failsafe:
             r = self.driver.takeover()
@@ -239,21 +252,14 @@ class WinInputDriver(InputDriver):
 
     FOCUS_STABLE_S = 0.3
 
-    def focus_game(self, timeout_s=15.0):
-        """Bring the game to the foreground WITHOUT injecting any input into another window.
-        1. restore it if minimised; 2. SetForegroundWindow; 3. if Windows' foreground lock refuses, attach this
-        thread's input queue to the current foreground thread (AttachThreadInput), retry, detach; 4. otherwise ask
-        the user to click the game's TITLE BAR (a click inside the game would shoot a web).
-        Nothing may be held (runner releases first); the emergency stop is polled throughout and aborts; the
-        game must then stay in the foreground for FOCUS_STABLE_S before the runner may send anything."""
+    def _focus_attempt(self, strategy):
+        """One non-injecting foreground strategy. Returns True if Webbed is in front right after it."""
         u32, k32 = self.u32, self.ct.WinDLL('kernel32')
-        if self.held:
-            self.release_all()
         if u32.IsIconic(self.hwnd):
             u32.ShowWindow(self.hwnd, 9)                       # SW_RESTORE
-        if not self.foreground_ok():
+        if strategy == 'set':
             u32.SetForegroundWindow(self.hwnd)
-        if not self.foreground_ok():
+        elif strategy == 'attach':                             # share the foreground thread's input state
             fg = u32.GetForegroundWindow()
             fg_tid = u32.GetWindowThreadProcessId(fg, None) if fg else 0
             me = k32.GetCurrentThreadId()
@@ -264,6 +270,34 @@ class WinInputDriver(InputDriver):
             finally:
                 if attached:
                     u32.AttachThreadInput(me, fg_tid, False)
+        elif strategy == 'switch':                             # the shell's own task-switch call
+            u32.SwitchToThisWindow(self.hwnd, True)
+        elif strategy == 'minrestore':                         # minimise + restore activates the window
+            u32.ShowWindow(self.hwnd, 6)                       # SW_MINIMIZE
+            time.sleep(0.15)
+            u32.ShowWindow(self.hwnd, 9)                       # SW_RESTORE
+            u32.SetForegroundWindow(self.hwnd)
+        time.sleep(0.12)
+        return self.foreground_ok()
+
+    FOCUS_STRATEGIES = ('set', 'attach', 'switch', 'minrestore')
+
+    def focus_game(self, timeout_s=20.0):
+        """Bring Webbed to the foreground WITHOUT injecting input into any other window: SetForegroundWindow,
+        AttachThreadInput (needed when the console runs inside Windows Terminal, whose process - not Python - owns
+        the foreground), SwitchToThisWindow, minimise/restore. If Windows refuses all of them, the user is asked
+        to click Webbed's TITLE BAR (a click inside the game would shoot a web). Nothing is held; F12 / Pause abort
+        at any moment; Webbed must stay in front for FOCUS_STABLE_S. Returns True on stable focus."""
+        if self.held:
+            self.release_all()
+        self.focus_log = []
+        for strat in self.FOCUS_STRATEGIES:
+            if self.emergency_pressed():
+                raise AbortRun('EMERGENCY STOP (F12 / Pause pressed) while focusing the game window')
+            if self.foreground_ok():
+                break
+            ok = self._focus_attempt(strat)
+            self.focus_log.append((strat, ok))
         t_end = time.monotonic() + timeout_s
         asked, stable_since = False, None
         while time.monotonic() < t_end:
@@ -277,8 +311,9 @@ class WinInputDriver(InputDriver):
             else:
                 stable_since = None
                 if not asked:
-                    print('  Click the Webbed window\'s TITLE BAR to give it focus (not inside the game: that would '
-                          'shoot a web). Waiting %d s; F12 / Pause aborts.' % timeout_s)
+                    print('  Windows refused to switch to Webbed (%s). Click Webbed\'s TITLE BAR once (not inside '
+                          'the game: that would shoot a web). Waiting %d s; F12 / Pause aborts.'
+                          % (', '.join(s for s, _ in self.focus_log) or 'no attempt'), timeout_s)
                     asked = True
             time.sleep(0.02)
         return False

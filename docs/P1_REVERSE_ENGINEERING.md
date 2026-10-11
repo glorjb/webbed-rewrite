@@ -463,7 +463,7 @@ retract key is confirmed; W3 (permanent webs) → `W5_weave_line`, `W5_weave_sna
 - **Not automated:** cutting a permanent web (control not recovered); skateboard scenarios.
 
 **Verification status:**
-- 70 runner unit tests pass against `autoref/mock.py`, a fake game with crude dynamics. It is **not** the
+- 77 runner unit tests pass against `autoref/mock.py`, a fake game with crude dynamics. It is **not** the
   recovered physics, and its output is never written to the real capture root. They cover:
   - the happy path and probe-compatible files;
   - missed inputs with retries and preservation;
@@ -524,6 +524,21 @@ retract key is confirmed; W3 (permanent webs) → `W5_weave_line`, `W5_weave_sna
       missing class / constant offset / error along x.
   - A physical Escape during readiness aborted the run. Takeover detection is now armed only after focus,
     readiness (including "no menu open / not paused") and setup; F12/Pause work in every phase.
+- **Third live run (2026-10-11): start-up blocked.**
+  - Readiness refused to start because `oMenuControllerPrompt` and `oSettingsMenu` instances existed. Existence
+    is not state: these can be persistent, hidden instances.
+  - Focus-loss abort was active in every phase, including readiness and read-only diagnostics, and a
+    gameplay-readiness gate ran after `-GroundScan`.
+  - Fixes:
+    - the pause decision uses only evidence: any instance's `paused` variable, found by an instance scan, or the
+      indicator measured by `-StateScan`;
+    - `-Check` prints a read-only state snapshot;
+    - focus-loss abort only while armed;
+    - read-only diagnostics never focus or arm;
+    - a single `prepare()` start-up path: announce, non-injecting refocus (4 strategies), hands-off wait, then arm;
+    - a walk acknowledged by `oIO` that doesn't move the spider within 30 frames stops as `not_controllable`.
+  - The pause/menu GML (`oGameManager` / menu objects) is still to be decoded locally; the `-StateScan`
+    indicator is a measurement.
 - **False "mouse moved by user".** The detector compared the cursor with where the runner had put it. That breaks
   when the game moves or locks the cursor; it is the likely cause, and `-AimScan` measures it. Takeover now uses
   low-level hooks: the runner's input is tagged (`dwExtraInfo`), and only physical input (or another program's

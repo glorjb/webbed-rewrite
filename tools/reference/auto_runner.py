@@ -52,6 +52,12 @@ def parse(argv=None):
                          'the cursor')
     ap.add_argument('--ground-scan', action='store_true',
                     help='diagnostic, sends nothing: the ground model around the spider and the solids near it')
+    ap.add_argument('--state-scan', action='store_true',
+                    help='diagnostic, sends nothing: ~15 s recording while you keep the pause menu closed, open it, '
+                         'close it; finds the variable that really means "menu open" and saves it for readiness')
+    ap.add_argument('--prompt', action='store_true',
+                    help='old behaviour: wait for Enter in the console before each new setup (default: set up in '
+                         'Webbed; the run starts once you let go for 3 s)')
     ap.add_argument('--compare-capture', metavar='SESSION_DIR',
                     help='with --ground-scan: compare the model with where the spider really stood in that capture '
                          '(made in the same room)')
@@ -78,7 +84,8 @@ def parse(argv=None):
 GAME_FAULTS = {'drop_keys', 'release_mode', 'io_latency', 'torn_every', 'skip_every', 'no_player_frames',
                'freeze_at', 'respawn_at', 'io_absent', 'weave_reels_in', 'jitter_pxps', 'cursor_recenters',
                'crosshair_static', 'mouse_relative', 'gh_reset_on_attach', 'scan_unavailable', 'floor_attaches',
-               'camera_offset', 'ground_x'}
+               'camera_offset', 'ground_x', 'persistent_menus', 'paused_owner', 'menu_window', 'menu_frames',
+               'scripted_user_menu'}
 DRIVER_FAULTS = {'emergency_at', 'focus_lost_at'}
 
 
@@ -91,6 +98,8 @@ def mock_kwargs(faults):
             game[k] = tuple(v.split(','))
         elif k == 'jitter_pxps':
             game[k] = float(v)
+        elif k == 'menu_window':
+            game[k] = tuple(int(x) for x in v.split(','))
         elif k in ('camera_offset', 'ground_x'):
             game[k] = tuple(float(x) for x in v.split(','))
         elif k == 'release_mode':
@@ -149,7 +158,7 @@ def main(argv=None):
     only = set(a.scenario) or None
     if only:
         suites = suites or [s for s in SUITE_ORDER if any(i in only for i in SUITES[s])]
-    diagnostic = a.aim_scan or a.aim_sight or a.ground_scan
+    diagnostic = a.aim_scan or a.aim_sight or a.ground_scan or a.state_scan
     if not (suites or a.check or calibrating or diagnostic):
         print('nothing to do: pass --all, --suite, --scenario, --check or --calibrate')
         return 2
@@ -164,7 +173,7 @@ def main(argv=None):
     os.makedirs(root, exist_ok=True)
     # mock sessions are fake: never run the physics regression suite against them
     # and calibration / check alone records nothing, so there is nothing new for the tests to judge
-    cfg = RN.Config(root, retries=a.retries, prompt=not a.no_prompt and not a.mock,
+    cfg = RN.Config(root, retries=a.retries, prompt=a.prompt and not a.no_prompt and not a.mock,
                     run_tests=bool(suites) and not (a.no_tests or a.mock),
                     mouse_failsafe=not a.no_mouse_failsafe, mode='mock' if a.mock else 'live',
                     trust_ground=a.trust_ground)
@@ -201,7 +210,8 @@ def main(argv=None):
         runner = RN.Runner(provider, driver, bnd, cfg, watchdog=watchdog)
         runner.guard.require_focus = not a.check
         print('Attaching (read-only)...')
-        run_info['init'] = runner.initialise(focus=not a.check)['report']
+        # no focus change here: read-only diagnostics never need it; input phases focus Webbed in prepare()
+        run_info['init'] = runner.initialise(focus=False)['report']
         run_info['bindings_source'] = bnd.source
         if a.ground_scan:
             gs = runner.ground_scan(a.compare_capture)
@@ -214,14 +224,35 @@ def main(argv=None):
             print('details: %s' % os.path.join(out, 'ground_scan.json'))
             if not (suites or calibrating or a.aim_scan or a.aim_sight or a.check):
                 cfg.run_tests = False
+        if a.state_scan:
+            out = os.path.join(cfg.runs_root, run_info['stamp'], 'statescan')
+            ss = runner.state_scan(out)
+            run_info['state_scan'] = {k: ss.get(k) for k in ('verdict', 'indicator', 'phases', 'candidates')}
+            print(ss['verdict'])
+            for ph, v in ss['phases'].items():
+                print('  %-9s %s' % (ph, v))
+            for c in ss['candidates'][:10]:
+                print('  candidate %-55s open %s closed %s' % (c['key'], c['open_values'], c['closed_values']))
+            print('details: %s' % out)
+            if not (suites or calibrating or a.aim_scan or a.aim_sight or a.check):
+                cfg.run_tests = False
         if a.check:
-            reasons = runner.wait_ready('any')
+            snap = runner.state_snapshot()
+            run_info['state_snapshot'] = snap
+            print('game state (read-only):')
+            print('  simulation: %s frames/s; Webbed in front: %s' % (snap['game_fps'], snap['webbed_in_front']))
+            print('  player: %s' % snap['player'])
+            for m in snap['menus']:
+                print('  menu instance %s#%s (present; existence alone is NOT "open"): %s'
+                      % (m['obj'], m['id'], dict(list(m['vars'].items())[:12])))
+            print('  paused variables: %s' % (snap['paused_owners'] or 'none found'))
+            print('  menu-open indicator: %s' % (snap['state_profile'] or 'not measured yet (run -StateScan)'))
+            print('  blocking evidence: %s' % (snap['blocking_reasons'] or 'none'))
+            reasons = runner.wait_ready('any', refocus=False)
             print('readiness: %s' % ('READY' if not reasons else 'NOT READY: ' + '; '.join(reasons)))
             print('bindings (%s): %s' % (bnd.source, bnd.keys))
             code = 0 if not reasons else 2
         else:
-            runner.ensure_ready('any', 'run start')          # gate: a failed check stops here, never continues
-            print('readiness: READY')
             needs_cal = calibrating or (not a.mock and not a.no_calibrate and not os.path.exists(cfg.bindings_file))
             if needs_cal:
                 bnd = runner.calibrate(B.load_defaults(), actions=a.calibrate or None, base=bnd)

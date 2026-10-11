@@ -26,7 +26,10 @@
   powershell -ExecutionPolicy Bypass -File tools\reference\auto_record.ps1 -Scenario W1_attach_hang
 
   -SelfTest   runner self-test against a FAKE game (no Webbed needed): mock run + runner unit tests.
-  -Check      attach read-only, report readiness and bindings; sends no input.
+  -Check      read-only: game state snapshot (simulation running, Webbed in front, player control state, menu
+              instances and their variables, paused variables) and readiness; sends no input, changes no focus.
+  -StateScan  read-only, ~20 s: keep the pause menu closed, open it at ONE beep, close it at TWO beeps; finds the
+              variable that really means "menu open" and saves it (game_state_profile.local.json).
   -Calibrate  find which key triggers each action (the spider moves, jumps and shoots a web). Records nothing.
   -CalibrateActions a,b   recalibrate only those actions; every other confirmed key is kept. The previous
               bindings file is always backed up (auto_bindings.local.<time>.bak.json).
@@ -59,6 +62,8 @@ param(
     [switch]$AimScan,
     [switch]$AimSight,
     [switch]$GroundScan,
+    [switch]$StateScan,
+    [switch]$Prompt,
     [string]$CompareCapture,
     [switch]$TrustGround,
     [switch]$SelfTest,
@@ -102,10 +107,12 @@ if ($NoMouseFailsafe) { $argsList += '--no-mouse-failsafe' }
 if ($AimScan) { $argsList += '--aim-scan' }
 if ($AimSight) { $argsList += '--aim-sight' }
 if ($GroundScan) { $argsList += '--ground-scan' }
+if ($StateScan) { $argsList += '--state-scan' }
+if ($Prompt) { $argsList += '--prompt' }
 if ($CompareCapture) { $argsList += '--compare-capture'; $argsList += $CompareCapture }
 if ($TrustGround) { $argsList += '--trust-ground' }
 $recording = [bool]($All -or $Suite -or $Scenario)
-if (-not ($recording -or $Check -or $Calibrate -or $CalibrateActions -or $AimScan -or $AimSight -or $GroundScan)) {
+if (-not ($recording -or $Check -or $Calibrate -or $CalibrateActions -or $AimScan -or $AimSight -or $GroundScan -or $StateScan)) {
     throw 'Pass -All, -Suite, -Scenario, -Check, -Calibrate, -CalibrateActions, -AimScan, -AimSight, -List or -SelfTest.'
 }
 

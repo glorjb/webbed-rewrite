@@ -57,10 +57,11 @@ class MockRun(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def make(self, retries=1, keys=None, trust_ground=False, **kw):
+    def make(self, retries=1, keys=None, trust_ground=False, setup_window=0, **kw):
         g = MockGame(**kw)
         d = MockInputDriver(g)
         cfg = Config(self.root, retries=retries, prompt=False, run_tests=False, mode='mock', trust_ground=trust_ground)
+        cfg.setup_window_frames = setup_window
         r = Runner(g, d, B.Bindings(keys if keys is not None else g.keys, source='test'), cfg, ui=QuietUI())
         r.initialise()
         return g, d, r
@@ -420,6 +421,87 @@ class MockRun(unittest.TestCase):
         self.assertEqual(inst[0]['verdict'], 'OK')
         self.assertFalse([e for e in d.events if e[2] > g.index - 1 and e[0] == 'down'])
 
+    # ------------------------------------------------------------------ live failure 7: menus, focus, startup
+    def test_persistent_menu_objects_do_not_block(self):
+        """Live 2026-10-11: oMenuControllerPrompt / oSettingsMenu instances existed during gameplay and readiness
+        refused to start. Existence is now evidence only; it is reported, not blocking."""
+        g, d, r = self.make(persistent_menus=True)
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        self.assertEqual({m['obj'] for m in res['game_state']['menus']}, {'oSettingsMenu', 'oMenuControllerPrompt'})
+
+    def test_real_pause_variable_delays_start_and_no_input_meanwhile(self):
+        g, d, r = self.make(persistent_menus=True, menu_window=(0, 400))
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        self.assertGreater(min(e[2] for e in d.events if e[0] == 'down'), 400)
+
+    def test_state_scan_finds_the_menu_indicator_and_readiness_uses_it(self):
+        g, d, r = self.make(persistent_menus=True, paused_owner=False)
+        b0 = g.index + 300 + 300                     # lead + phase A
+        g.menu_window = (b0 + 30, b0 + 300)          # the "user" opens the menu during phase B
+        an = r.state_scan(os.path.join(self.tmp, 'ss'))
+        self.assertEqual(an['indicator']['obj'], 'oSettingsMenu')
+        self.assertEqual(an['indicator']['var'], 'is_open')
+        self.assertEqual(an['indicator']['open_values'], [1])
+        self.assertTrue(any(c['key'].startswith('world byte') for c in an['candidates']))
+        self.assertEqual(set(an['phases']), {'A_closed', 'B_open', 'C_closed'})
+        self.assertFalse(d.events)                    # read-only: nothing pressed or moved
+        self.assertTrue(os.path.exists(r.cfg.state_profile_file))
+        g.menu_window = (g.index, g.index + 500)      # menu open again; only the indicator knows
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        self.assertGreater(min(e[2] for e in d.events if e[0] == 'down'), g.menu_window[1])
+
+    def test_invisible_pause_stops_a_walk_as_not_controllable(self):
+        g, d, r = self.make(retries=0, persistent_menus=True, paused_owner=False)
+        g.menu_window = (g.index + 60, g.index + 5000)   # opens during the scenario, nothing tells the runner
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertPreservedFailure(r, res, 'not_controllable')
+        self.assertEqual(d.held, set())
+
+    def test_invisible_pause_never_fires_an_aimed_shot(self):
+        g, d, r = self.make(retries=0, mouse_relative=True, cursor_recenters=True, paused_owner=False)
+        r.aim_profile = {'mode': 'relative', 'method': 'abs', 'pair': ['player.aimx', 'player.aimy'],
+                         'kind': 'point', 'gain': [[0.75, 0.0], [0.0, 0.75]], 'lag_frames': 1}
+        g.menu_window = (g.index + 45, g.index + 5000)
+        res = self.run_ids(r, ['W1_attach_hang'])[0]
+        self.assertEqual(res['failure']['kind'], 'aim_failed')
+        self.assertFalse([e for e in d.events if e[1] == 'LMB'])
+
+    def test_initial_focus_transition_from_console(self):
+        """Starting from PowerShell: Webbed is not in front; the runner brings it forward itself (no Alt+Tab)."""
+        g, d, r = self.make()
+        d.focus_lost_at = 0                            # console in front at start
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+
+    def test_read_only_diagnostics_need_no_focus(self):
+        g, d, r = self.make()
+        d.focus_lost_at = 0
+        d.refocus_ok = False
+        out = r.ground_scan()
+        self.assertEqual(out['profile']['confidence'], 'estimate')
+        self.assertFalse(d.armed)
+        self.assertFalse(d.events)
+
+    def test_setup_window_waits_for_the_user_then_hands_off(self):
+        g, d, r = self.make(setup_window=900)
+        start = g.index
+        d.physical_at = [(start + 100, 'move'), (start + 160, 'key'), (start + 220, 'move')]
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertEqual(res['status'], 'pass', res.get('failure'))
+        first = min(e[2] for e in d.events if e[0] == 'down')
+        self.assertGreaterEqual(first, start + 220 + 180)        # 3 s of game time after the last touch
+        self.assertLess(first, start + 900)                       # ended early: the user had moved
+
+    def test_emergency_stop_during_setup(self):
+        g, d, r = self.make(setup_window=900)
+        d.physical_at = [(g.index + 50, 'f12')]
+        with self.assertRaises(AbortRun):
+            self.run_ids(r, ['M2_walk_short'])
+        self.assertFalse([e for e in d.events if e[0] == 'down'])
+
     # ------------------------------------------------------------------ diagnostics
     def test_aim_scan_finds_mouse_following_variables(self):
         g, d, r = self.make()
@@ -450,15 +532,14 @@ class MockRun(unittest.TestCase):
         self.assertAlmostEqual(out['P'][1], 320.0, delta=1.0)
 
     # ------------------------------------------------------------------ safety
-    def test_focus_restore_failure_after_prompt_aborts_safely(self):
-        g, d, r = self.make()
+    def test_refused_focus_ends_not_ready_and_sends_nothing(self):
+        g, d, r = self.make(retries=0)
         d.refocus_ok = False
         d.focus_lost_at = 0
-        r.ui.ask = lambda msg: ''
-        with self.assertRaises(AbortRun) as cm:
-            self.run_ids(r, ['M2_walk_flat'])
-        self.assertIn('TITLE BAR', str(cm.exception))
-        self.assertEqual(d.held, set())
+        res = self.run_ids(r, ['M2_walk_short'])[0]
+        self.assertEqual(res['failure']['kind'], 'not_ready')
+        self.assertIn('not the foreground window', res['failure']['msg'])
+        self.assertFalse([e for e in d.events if e[0] == 'down'])
         self.assertEqual(self.sessions(self.root), [])
 
     def test_emergency_stop_while_waiting_for_focus(self):
@@ -468,31 +549,17 @@ class MockRun(unittest.TestCase):
             r.focus()
         self.assertIn('EMERGENCY', str(cm.exception))
 
-    def test_observe_only_mode_does_not_require_focus(self):
+    def test_focus_loss_only_aborts_while_armed(self):
+        """Unarmed phases (readiness, setup, read-only diagnostics) tolerate focus changes; armed phases abort."""
         g, d, r = self.make()
         d.focus_lost_at = 0
-        r.guard.require_focus = False
-        self.assertEqual(r.wait_ready('any', timeout=100), [])
-        r.guard.require_focus = True
+        d.refocus_ok = False
+        self.assertEqual(r.wait_ready('any', timeout=100), [])        # unarmed: no abort, no refocus needed
+        d.arm()
         with self.assertRaises(AbortRun):
             r.wait_ready('any', timeout=100)
-
-    def test_emergency_stop_aborts_releases_and_preserves(self):
-        g, d, r = self.make()
-        d.emergency_at = 150                                      # during the first walk
-        with self.assertRaises(AbortRun):
-            self.run_ids(r, ['M2_walk_flat'])
-        self.assertEqual(d.held, set())
-        self.assertPreservedFailure(r, r.results[0], 'aborted')
-        self.assertIn('EMERGENCY', r.results[0]['failure']['msg'])
-
-    def test_focus_loss_aborts(self):
-        g, d, r = self.make()
-        d.focus_lost_at = 150
-        with self.assertRaises(AbortRun):
-            self.run_ids(r, ['M2_walk_flat'])
-        self.assertEqual(d.held, set())
-        self.assertIn('focus', r.results[0]['failure']['msg'])
+        r.guard.require_focus = False                                   # -Check: never
+        self.assertEqual(r.wait_ready('any', timeout=100), [])
 
     def test_watchdog_releases_held_inputs_when_loop_stalls(self):
         g = MockGame()

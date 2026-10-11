@@ -36,7 +36,7 @@ class MockInputDriver(InputDriver):
         self.focus_lost_at = None
         self.emergency_at = None
         self.refocus_ok = True              # focus_game() succeeds (False: Windows refused and nobody clicked)
-        self.monitor = TakeoverMonitor()    # same logic as the live low-level hooks
+        self.monitor = TakeoverMonitor(clock=lambda: game.t)   # same logic as the live hooks, on game time
         self.physical_at = []               # [(frame index, 'move' | 'key' | 'button' | 'f12')]: simulated user input
         self.cursor = (client[0] / 2.0, client[1] / 2.0)   # where Windows reports the pointer
         self.aim_cursor = self.cursor                        # where the fake game last sampled it
@@ -118,7 +118,8 @@ class MockGame:
                  freeze_at=None, respawn_at=None, release_mode='button-up', view_scale=0.75, start_frame=50000,
                  io_absent=(), weave_reels_in=False, jitter_pxps=0.0, cursor_recenters=False,
                  crosshair_static=False, mouse_relative=False, floor_attaches=True, scan_unavailable=False,
-                 gh_reset_on_attach=True, camera_offset=(0.0, 0.0), extra_solids=(), menu_frames=0):
+                 gh_reset_on_attach=True, camera_offset=(0.0, 0.0), extra_solids=(), menu_frames=0,
+                 persistent_menus=False, menu_window=None, paused_owner=True, scripted_user_menu=False):
         self.keys = dict(bindings_keys or {'right': 'D', 'left': 'A', 'jump': 'SPACE', 'grapple': 'LMB',
                                            'weave': 'RMB', 'retract': 'SHIFT'})
         self.ground_y, self.ground_x, self.ceiling_y, self.wall_x = ground_y, ground_x, ceiling_y, wall_x
@@ -141,7 +142,11 @@ class MockGame:
         self.gh_reset_on_attach = gh_reset_on_attach   # gh/gv read 0 once the shot is gone (unknown in the game)
         self.camera_offset = camera_offset      # player's screen position minus the window centre (client px)
         self.extra_solids = list(extra_solids)  # groundscan solids added to the floor (tests: unknown shapes etc.)
-        self.menu_frames = menu_frames          # a pause menu is open for the first N frames
+        # menus (live 2026-10-11: oSettingsMenu / oMenuControllerPrompt instances exist during gameplay)
+        self.persistent_menus = persistent_menus  # menu instances always present (closed unless menu_window)
+        self.menu_window = menu_window or ((0, menu_frames) if menu_frames else None)   # frame-index range: open
+        self.paused_owner = paused_owner        # oGameManager.paused mirrors the open menu (else only is_open)
+        self.scripted_user_menu = scripted_user_menu
         self.shot_vars = {'gh': 0.0, 'gv': 0.0, 'sx': None, 'sy': None, 'gx': None, 'gy': None}
         self.cross0 = None
         self.view_scale = view_scale
@@ -197,8 +202,49 @@ class MockGame:
             return {'confidence': 'unavailable', 'reason': 'mock: scan unavailable'}
         return G.ground_profile(self.ground_solids(), (self.x, self.y), 9001)
 
-    def pause_state(self):
-        return {'menus': ['oSettingsMenu'] if self.index <= self.menu_frames else [], 'paused': {}}
+    def on_phase(self, phase):
+        """-StateScan phase change: a scripted user opens the menu ~0.5 s into phase B and closes it at C."""
+        if self.scripted_user_menu:
+            if phase == 'B_open':
+                self.menu_window = (self.index + 30, 10 ** 9)
+            elif phase == 'C_closed' and self.menu_window:
+                self.menu_window = (self.menu_window[0], self.index + 20)
+
+    def menu_open(self):
+        return bool(self.menu_window) and self.menu_window[0] <= self.index <= self.menu_window[1]
+
+    def menu_instances(self):
+        out = []
+        if self.persistent_menus or self.menu_open():
+            out = [(('menu', 4101), 4101, 'oSettingsMenu'), (('menu', 4102), 4102, 'oMenuControllerPrompt')]
+        return out
+
+    def instance_vars(self, ptr):
+        if ptr == ('menu', 4101):
+            return {'is_open': 1 if self.menu_open() else 0, 'sel': 2, 'alpha': 1.0}
+        if ptr == ('menu', 4102):
+            return {'controller': 0}
+        if ptr == ('mgr', 4001):
+            return {'paused': 1 if self.menu_open() else 0, 'mgr_timer': self.index}
+        return {}
+
+    def find_var_owners(self, name, refresh=False):
+        if name == 'paused' and self.paused_owner:
+            return [(('mgr', 4001), 4001, 'oGameManager', 1 if self.menu_open() else 0)]
+        return []
+
+    def world_raw(self, length=0x80):
+        return ('3c0000000a000000' + ('01' if self.menu_open() else '00') + '00' * 7).ljust(length * 2, '0')
+
+    def game_state(self, refresh=False):
+        return {'menus': [{'id': i, 'obj': o} for _, i, o in self.menu_instances()],
+                'paused_owners': [{'id': i, 'obj': o, 'value': v} for _, i, o, v in self.find_var_owners('paused')]}
+
+    def indicator_value(self, ind):
+        for p, iid, obj in self.menu_instances() + [(p, i, o) for p, i, o, _ in self.find_var_owners(ind['var'])]:
+            if obj == ind['obj']:
+                return self.instance_vars(p).get(ind['var'])
+        return None
 
     def idle(self, writer=None):
         pass
@@ -268,6 +314,12 @@ class MockGame:
 
     def _step(self):
         self.history.append(set(self.driver.held) if self.driver else set())
+        if self.menu_open():                       # paused: input object updates, the world does not
+            vcur = self.vcur
+            self.io = self._io()
+            self.vcur = vcur
+            self.prev_io = self.io
+            return
         io = self.io = self._io()
         if self.respawn_at is not None and self.index == self.respawn_at:
             self.pid += 1

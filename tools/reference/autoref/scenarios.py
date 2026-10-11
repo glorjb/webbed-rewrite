@@ -119,16 +119,27 @@ class Ctx:
                   'latency_frames': n})
         return n
 
-    def hold(self, action, frames, check=None):
+    MOTION_FRAMES = 30          # a walk that the game acknowledged must move the spider within this many frames
+
+    def hold(self, action, frames, check=None, expect_motion=False):
         """Press, wait for the oIO acknowledgement, release `frames` frames after the press was issued, wait for
         the release acknowledgement. With equal press/release latency the game sees exactly `frames` held frames;
         the frames it actually saw (from oIO) are recorded, so latency jitter shows up as a deviation."""
         self.press(action)
         lat_dn = yield from self.await_ack(action, True)
+        b0 = S.body(self.row)
+        x0 = b0['pos_px'][0] if b0 else None
         seen = 1
-        for _ in range(max(frames - lat_dn, 0)):
+        for k in range(max(frames - lat_dn, 0)):
             yield
             seen += 1 if B.held(S.io(self.row), action) else 0
+            if expect_motion and k + 1 == self.MOTION_FRAMES and x0 is not None:
+                b = S.body(self.row)
+                if b and abs(b['pos_px'][0] - x0) < 2.0:
+                    self.release(action)
+                    raise ScenarioFailure('not_controllable', 'oIO shows %s held for %d frames but the spider did not '
+                                          'move: the game is paused, a menu is open, or the spider is stuck'
+                                          % (action, self.MOTION_FRAMES))
             if check:
                 check(self)
         self.release(action)
@@ -503,7 +514,7 @@ def m2_walk_flat(ctx):
     for action in ('right', 'left'):
         ctx.mark()
         g = keep_grounded(origin=())
-        yield from ctx.hold(action, 240, check=g)
+        yield from ctx.hold(action, 240, check=g, expect_motion=True)
         yield from ctx.wait(120, check=g)
 
 
@@ -515,7 +526,7 @@ def m2_walk_short(ctx, hold=90):
     g = keep_grounded(origin=())
     for action in ('right', 'left', 'left', 'right'):
         ctx.mark()
-        yield from ctx.hold(action, hold, check=g)
+        yield from ctx.hold(action, hold, check=g, expect_motion=True)
         yield from ctx.wait(60, check=g)
 
 
